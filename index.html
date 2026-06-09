@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRYPTVAULT</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    font-family: "Press Start 2P", monospace;
+  }
+
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    object-fit: contain;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: #000;
+    margin: 0 auto;
+    cursor: crosshair;
+  }
+</style>
+</head>
+<body>
+<canvas id="game" width="480" height="270"></canvas>
+<script>
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------------------
+  // EMBEDDED SPRITESHEET (Kenney Tiny Dungeon, CC0) — base64 data URI.
+  // Same-origin by definition, so no CORS and no network request.
+  // ---------------------------------------------------------------------------
+  var SPRITE_B64 = "data:image/png;base64,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";
+
+  // ---------------------------------------------------------------------------
+  // CANVAS & RESOLUTION
+  // ---------------------------------------------------------------------------
+  var W = 480, H = 270;
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  canvas.width = W;
+  canvas.height = H;
+  ctx.imageSmoothingEnabled = false;
+
+  // Scale factor used to translate mouse coords into game coords.
+  var scale = 1, offsetX = 0, offsetY = 0;
+  function computeScale() {
+    var sx = window.innerWidth / W;
+    var sy = window.innerHeight / H;
+    scale = Math.min(sx, sy);
+    // object-fit: contain centres the canvas; compute the letterbox offsets.
+    var dispW = W * scale;
+    var dispH = H * scale;
+    offsetX = (window.innerWidth - dispW) / 2;
+    offsetY = (window.innerHeight - dispH) / 2;
+  }
+  computeScale();
+  window.addEventListener('resize', computeScale);
+
+  // ---------------------------------------------------------------------------
+  // SPRITE LOADING — embedded base64 (no CORS), procedural fallback as safety.
+  // ---------------------------------------------------------------------------
+  var useProceduralSprites = false;
+  var uiSpriteLoaded = false; // UI sheet no longer used; cards drawn procedurally.
+
+  var spritesheet = new Image();
+  var sheetReady = false;
+  try {
+    // Data URI is same-origin — do NOT set crossOrigin.
+    spritesheet.onload = function () { sheetReady = true; useProceduralSprites = false; };
+    spritesheet.onerror = function () {
+      useProceduralSprites = true;
+      console.warn('Sprite load failed — using procedural fallback renderer');
+    };
+    spritesheet.src = SPRITE_B64;
+  } catch (e) {
+    useProceduralSprites = true;
+    console.warn('Sprite load failed — using procedural fallback renderer');
+  }
+
+  // Tile source rects (verified against the embedded Tiny Dungeon packed sheet,
+  // 192x176 = 12x11 tiles of 16px).
+  var TILE = {
+    playerIdle: { x: 0,  y: 112 }, // purple-hooded hero
+    playerWalk: { x: 0,  y: 112 }, // single frame; vertical bob animates the walk
+    skeleton:   { x: 0,  y: 128 }, // grey-blue bones
+    slime:      { x: 0,  y: 144 }, // green blob
+    orc:        { x: 32, y: 144 }, // red demon
+    boss:       { x: 32, y: 144 }, // red demon, drawn at 32x32
+    floor:      { x: 16, y: 64 },  // tan dungeon ground
+    floorAlt:   { x: 32, y: 64 },  // tan variant
+    wall:       { x: 16, y: 64 }   // darkened with overlay for shadow tiles
+  };
+
+  // Draw a 16x16 sheet tile, optionally flipped horizontally.
+  function drawTile(tile, dx, dy, dw, dh, flip) {
+    if (useProceduralSprites || !sheetReady) return false;
+    ctx.imageSmoothingEnabled = false;
+    if (flip) {
+      ctx.save();
+      ctx.translate(dx + dw, dy);
+      ctx.scale(-1, 1);
+      ctx.drawImage(spritesheet, tile.x, tile.y, 16, 16, 0, 0, dw, dh);
+      ctx.restore();
+    } else {
+      ctx.drawImage(spritesheet, tile.x, tile.y, 16, 16, dx, dy, dw, dh);
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // WEB AUDIO — 8-bit synthesised SFX. Context created lazily on first gesture.
+  // ---------------------------------------------------------------------------
+  var audioCtx = null, masterGain = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = 0.4; // modest master volume
+        masterGain.connect(audioCtx.destination);
+      } catch (e) { audioCtx = null; return; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function playShoot() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var o = audioCtx.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(880, t);
+    o.frequency.linearRampToValueAtTime(220, t + 0.08);
+    var g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.3, t);
+    g.gain.linearRampToValueAtTime(0, t + 0.08);
+    o.connect(g); g.connect(masterGain);
+    o.start(t); o.stop(t + 0.09);
+  }
+
+  function playHit() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.4, t);
+    g.gain.linearRampToValueAtTime(0, t + 0.15);
+    g.connect(masterGain);
+    var o1 = audioCtx.createOscillator(); o1.type = 'sawtooth';
+    o1.frequency.value = 150; o1.connect(g);
+    o1.start(t); o1.stop(t + 0.16);
+    var o2 = audioCtx.createOscillator(); o2.type = 'sawtooth';
+    o2.frequency.value = 145;
+    var g2 = audioCtx.createGain();
+    g2.gain.setValueAtTime(0.2, t);
+    g2.gain.linearRampToValueAtTime(0, t + 0.15);
+    o2.connect(g2); g2.connect(masterGain);
+    o2.start(t); o2.stop(t + 0.16);
+  }
+
+  function playLevelUp() {
+    if (!audioCtx) return;
+    var notes = [523, 659, 784, 1047];
+    var t = audioCtx.currentTime;
+    for (var i = 0; i < notes.length; i++) {
+      var st = t + i * 0.12; // 0.1s note + 0.02s gap
+      var o = audioCtx.createOscillator(); o.type = 'square';
+      o.frequency.value = notes[i];
+      var g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.25, st);
+      g.gain.linearRampToValueAtTime(0, st + 0.1);
+      o.connect(g); g.connect(masterGain);
+      o.start(st); o.stop(st + 0.11);
+    }
+  }
+
+  function playBossDeath() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var len = Math.floor(audioCtx.sampleRate * 0.5);
+    var buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    var data = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    var src = audioCtx.createBufferSource(); src.buffer = buf;
+    var f = audioCtx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 200;
+    var g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.6, t);
+    g.gain.linearRampToValueAtTime(0, t + 0.5);
+    src.connect(f); f.connect(g); g.connect(masterGain);
+    src.start(t); src.stop(t + 0.5);
+  }
+
+  // ---------------------------------------------------------------------------
+  // INPUT
+  // ---------------------------------------------------------------------------
+  var keys = {};
+  var mouse = { x: 0, y: 0 };
+
+  window.addEventListener('keydown', function (e) {
+    ensureAudio();
+    keys[e.code] = true;
+    if (e.code === 'Enter') handleConfirm();
+    // Prevent arrow keys / space scrolling the page.
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].indexOf(e.code) !== -1) {
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', function (e) { keys[e.code] = false; });
+
+  function toGameCoords(clientX, clientY) {
+    return {
+      x: (clientX - offsetX) / scale,
+      y: (clientY - offsetY) / scale
+    };
+  }
+
+  canvas.addEventListener('mousemove', function (e) {
+    var p = toGameCoords(e.clientX, e.clientY);
+    mouse.x = p.x; mouse.y = p.y;
+  });
+
+  canvas.addEventListener('mousedown', ensureAudio);
+
+  canvas.addEventListener('click', function (e) {
+    ensureAudio();
+    var p = toGameCoords(e.clientX, e.clientY);
+    mouse.x = p.x; mouse.y = p.y;
+    if (game.gameState === 'title' || game.gameState === 'gameover') {
+      handleConfirm();
+    } else if (game.gameState === 'levelup') {
+      tryPickCard(p.x, p.y);
+    }
+  });
+
+  function handleConfirm() {
+    if (game.gameState === 'title') {
+      startGame();
+    } else if (game.gameState === 'gameover') {
+      startGame();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // RANDOM HELPERS
+  // ---------------------------------------------------------------------------
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function randInt(a, b) { return Math.floor(rand(a, b + 1)); }
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+  // ---------------------------------------------------------------------------
+  // STATIC DUNGEON FLOOR (seeded once so it doesn't shimmer)
+  // ---------------------------------------------------------------------------
+  var TILE_SIZE = 16;
+  var floorTiles = [];
+  function buildFloor() {
+    floorTiles = [];
+    var cols = Math.ceil(W / TILE_SIZE);
+    var rows = Math.ceil(H / TILE_SIZE);
+    for (var ry = 0; ry < rows; ry++) {
+      for (var rx = 0; rx < cols; rx++) {
+        var r = Math.random();
+        var variant = 0;            // normal floor
+        if (r < 0.12) variant = 1;  // shadow/dark tile
+        else if (r < 0.20) variant = 2; // alt floor
+        // procedural grey shade variation
+        var shade = randInt(36, 52);
+        floorTiles.push({ x: rx * TILE_SIZE, y: ry * TILE_SIZE, variant: variant, shade: shade });
+      }
+    }
+  }
+  buildFloor();
+
+  // ---------------------------------------------------------------------------
+  // UPGRADE DEFINITIONS
+  // ---------------------------------------------------------------------------
+  var UPGRADES = [
+    { id: 'multishot', name: 'MULTI-SHOT', desc: '+1 projectile per shot', color: '#ff6b6b' },
+    { id: 'atkspeed',  name: 'ATTACK SPD', desc: 'Fire 0.1s faster', color: '#feca57' },
+    { id: 'damage',    name: 'DMG BOOST',  desc: '+15 damage per shot', color: '#ff9ff3' },
+    { id: 'health',    name: 'HEALTH UP',  desc: '+30 max HP, heal 30', color: '#1dd1a1' },
+    { id: 'movespeed', name: 'MOVE SPD',   desc: '+20 move speed', color: '#54a0ff' },
+    { id: 'pierce',    name: 'PIERCE',     desc: 'Shots pierce +1 foe', color: '#48dbfb' },
+    { id: 'vampire',   name: 'VAMPIRE',    desc: 'Heal 3 HP per kill', color: '#ee5253' },
+    { id: 'xpmagnet',  name: 'XP MAGNET',  desc: '+20% XP from kills', color: '#5f27cd' },
+    { id: 'shotgun',   name: 'SHOTGUN',    desc: '5-shot 60deg blast', color: '#ff9f1c' },
+    { id: 'homing',    name: 'HOMING SHOT',desc: 'Shots seek foes',    color: '#2ec4b6' },
+    { id: 'shield',    name: 'ORBIT SHIELD',desc:'Orbs circle you',    color: '#00e5ff' }
+  ];
+
+  // ---------------------------------------------------------------------------
+  // GAME STATE
+  // ---------------------------------------------------------------------------
+  var game = {
+    gameState: 'title',
+    enemies: [],
+    projectiles: [],
+    particles: [],
+    wave: 1,
+    xp: 0,
+    level: 1,
+    score: 0, // kills
+    spawnTimer: 0,
+    waveKills: 0,
+    waveTarget: 0,
+    waveIntroTimer: 0,    // countdown for the 'waveintro' card
+    bossWave: false,      // is the current wave a boss wave?
+    boss: null,           // reference to the live boss (or null)
+    advanceAfterLevel: false, // after a forced boss level-up, start next wave
+    damageFlash: 0,
+    shakeTimer: 0,
+    whiteFlash: 0,        // frames of full-screen white flash (boss death)
+    time: 0,              // running game time in seconds
+    enemyUid: 0,          // unique id source for enemies
+    scanlineOffset: 0,
+    blinkTimer: 0,
+    blinkOn: true,
+    cards: [],
+    player: null
+  };
+
+  function makePlayer() {
+    return {
+      x: W / 2, y: H / 2,
+      w: 12, h: 16,
+      speed: 80,
+      hp: 100, maxHp: 100,
+      facing: 1,
+      moving: false,
+      walkAnim: 0,
+      attackCooldown: 0.8,
+      attackTimer: 0,
+      // upgrade-driven stats
+      projectiles: 1,
+      damage: 20,
+      pierce: 0,
+      vampire: 0,
+      xpMult: 1,
+      shotgun: 0,        // shotgun blast level
+      homing: 0,         // homing shot level
+      shield: 0,         // orbiting shield level
+      orbs: [],          // orbiting shield orbs
+      orbRadius: 40,
+      orbSpeed: 0,       // radians/sec
+      upgradesTaken: {}
+    };
+  }
+
+  // Rebuild the orbiting-shield orbs from the current shield level.
+  function rebuildOrbs() {
+    var p = game.player;
+    var count = 2 + p.shield;                              // 1st pick = 3 orbs, +1 each after
+    p.orbSpeed = (120 + (p.shield - 1) * 30) * Math.PI / 180; // 120deg/s, +30 per extra pick
+    var orbs = [];
+    for (var i = 0; i < count; i++) {
+      orbs.push({ angle: (Math.PI * 2 / count) * i, x: p.x, y: p.y, hitCd: {} });
+    }
+    p.orbs = orbs;
+    p.orbRadius = 40;
+  }
+
+  function startGame() {
+    game.particles = [];
+    game.xp = 0;
+    game.level = 1;
+    game.score = 0;
+    game.damageFlash = 0;
+    game.shakeTimer = 0;
+    game.whiteFlash = 0;
+    game.time = 0;
+    game.enemyUid = 0;
+    game.advanceAfterLevel = false;
+    game.player = makePlayer();
+    buildFloor();
+    beginWave(1);
+  }
+
+  // Set up a wave and show its 2-second intro card before combat begins.
+  function beginWave(n) {
+    game.wave = n;
+    game.bossWave = (n % 5 === 0);
+    game.enemies = [];
+    game.projectiles = [];
+    game.boss = null;
+    game.waveKills = 0;
+    game.waveTarget = game.bossWave ? 1 : (15 + n * 5);
+    game.spawnTimer = 0;
+    game.gameState = 'waveintro';
+    game.waveIntroTimer = 2.0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // ENEMY FACTORY
+  // ---------------------------------------------------------------------------
+  function enemyTypeForWave(wave) {
+    var roll = Math.random();
+    if (wave >= 4 && roll < 0.25) return 'orc';
+    if (roll < 0.5) return 'skeleton';
+    return 'slime';
+  }
+
+  var ENEMY_DATA = {
+    skeleton: { hp: 30, color: '#8b9bb4', tile: TILE.skeleton },
+    slime:    { hp: 50, color: '#43e1b3', tile: TILE.slime },
+    orc:      { hp: 120, color: '#e84537', tile: TILE.orc }
+  };
+
+  function spawnEnemy() {
+    if (game.enemies.length >= 200) return;
+    var type = enemyTypeForWave(game.wave);
+    var data = ENEMY_DATA[type];
+    // pick an edge (not corners): bias spawn away from exact corners
+    var edge = randInt(0, 3);
+    var x, y;
+    if (edge === 0) { x = rand(20, W - 20); y = -16; }          // top
+    else if (edge === 1) { x = W + 16; y = rand(20, H - 20); }  // right
+    else if (edge === 2) { x = rand(20, W - 20); y = H + 16; }  // bottom
+    else { x = -16; y = rand(20, H - 20); }                     // left
+
+    var speed = 40 + game.wave * 5;
+    game.enemies.push({
+      type: type, isBoss: false, uid: game.enemyUid++,
+      x: x, y: y,
+      w: 14, h: 14,
+      hp: data.hp, maxHp: data.hp,
+      color: data.color,
+      tile: data.tile,
+      speed: speed,
+      contact: 10,
+      kx: 0, ky: 0,        // knockback velocity
+      hitFlash: 0,
+      animPhase: rand(0, Math.PI * 2)
+    });
+  }
+
+  // Spawn a single boss from the top-centre of the canvas.
+  function spawnBoss() {
+    var hp = 600 + game.wave * 80;
+    var boss = {
+      type: 'boss', isBoss: true, uid: game.enemyUid++,
+      x: W / 2, y: -20,
+      w: 28, h: 28,
+      hp: hp, maxHp: hp,
+      color: '#e84537',
+      tile: TILE.boss,
+      speed: 25,
+      contact: 25,
+      kx: 0, ky: 0,
+      hitFlash: 0,
+      animPhase: 0
+    };
+    game.enemies.push(boss);
+    game.boss = boss;
+  }
+
+  // ---------------------------------------------------------------------------
+  // PARTICLES
+  // ---------------------------------------------------------------------------
+  function spawnDeathParticles(x, y, color) {
+    for (var i = 0; i < 8; i++) {
+      if (game.particles.length >= 500) break;
+      var ang = (Math.PI * 2 / 8) * i + rand(-0.3, 0.3);
+      var spd = rand(40, 110);
+      game.particles.push({
+        x: x, y: y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        life: 0.5, maxLife: 0.5,
+        size: 2,
+        color: color
+      });
+    }
+  }
+
+  // Over-the-top boss death burst: 40 red/orange/gold 3x3 particles.
+  function bossExplosion(x, y) {
+    var cols = ['#ff2d2d', '#ff8c00', '#ffd700'];
+    for (var i = 0; i < 40; i++) {
+      if (game.particles.length >= 500) break;
+      var ang = rand(0, Math.PI * 2);
+      var spd = rand(100, 300);
+      game.particles.push({
+        x: x, y: y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        life: 1.2, maxLife: 1.2,
+        size: 3,
+        color: cols[randInt(0, 2)]
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SHOOTING
+  // ---------------------------------------------------------------------------
+  function findNearestEnemy(px, py) {
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < game.enemies.length; i++) {
+      var e = game.enemies[i];
+      var dx = e.x - px, dy = e.y - py;
+      var d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    return best;
+  }
+
+  function spawnProjectile(p, ang, dmg) {
+    game.projectiles.push({
+      x: p.x, y: p.y,
+      vx: Math.cos(ang) * 200,
+      vy: Math.sin(ang) * 200,
+      damage: dmg,
+      pierce: p.pierce,
+      // homing strength: 0.08 base, +0.04 per extra pick (0 if not taken)
+      homing: p.homing > 0 ? (0.08 + (p.homing - 1) * 0.04) : 0,
+      hitSet: []
+    });
+  }
+
+  function fireWeapon() {
+    var p = game.player;
+    var target = findNearestEnemy(p.x, p.y);
+    if (!target) return;
+    var baseAng = Math.atan2(target.y - p.y, target.x - p.x);
+
+    // main fan (multishot)
+    var n = p.projectiles;
+    var spread = 15 * Math.PI / 180; // 15 degrees between shots
+    for (var i = 0; i < n; i++) {
+      spawnProjectile(p, baseAng + (i - (n - 1) / 2) * spread, p.damage);
+    }
+
+    // shotgun blast: 5 pellets over 60deg, +2 pellets & +10deg per extra pick
+    if (p.shotgun > 0) {
+      var pellets = 5 + (p.shotgun - 1) * 2;
+      var arc = (60 + (p.shotgun - 1) * 10) * Math.PI / 180;
+      for (var k = 0; k < pellets; k++) {
+        var t = pellets > 1 ? (k / (pellets - 1) - 0.5) : 0;
+        spawnProjectile(p, baseAng + t * arc, p.damage * 0.6);
+      }
+    }
+
+    playShoot();
+  }
+
+  // ---------------------------------------------------------------------------
+  // XP / LEVEL UP
+  // ---------------------------------------------------------------------------
+  function xpForNext() { return 50 + game.level * 30; }
+
+  function gainXP(amount) {
+    game.xp += amount;
+    while (game.xp >= xpForNext()) {
+      game.xp -= xpForNext();
+      game.level++;
+      triggerLevelUp();
+    }
+  }
+
+  function triggerLevelUp() {
+    game.gameState = 'levelup';
+    playLevelUp();
+    // pick 3 distinct upgrades
+    var pool = UPGRADES.slice();
+    var chosen = [];
+    for (var i = 0; i < 3 && pool.length > 0; i++) {
+      var idx = randInt(0, pool.length - 1);
+      chosen.push(pool.splice(idx, 1)[0]);
+    }
+    // build card rects
+    var cardW = 120, cardH = 160, gap = 20;
+    var totalW = chosen.length * cardW + (chosen.length - 1) * gap;
+    var startX = (W - totalW) / 2;
+    var cy = (H - cardH) / 2;
+    game.cards = chosen.map(function (u, i) {
+      return {
+        upgrade: u,
+        x: startX + i * (cardW + gap),
+        y: cy,
+        w: cardW, h: cardH
+      };
+    });
+  }
+
+  function applyUpgrade(u) {
+    var p = game.player;
+    p.upgradesTaken[u.id] = (p.upgradesTaken[u.id] || 0) + 1;
+    switch (u.id) {
+      case 'multishot': p.projectiles = Math.min(5, p.projectiles + 1); break;
+      case 'atkspeed':  p.attackCooldown = Math.max(0.2, p.attackCooldown - 0.1); break;
+      case 'damage':    p.damage += 15; break;
+      case 'health':    p.maxHp += 30; p.hp = Math.min(p.maxHp, p.hp + 30); break;
+      case 'movespeed': p.speed += 20; break;
+      case 'pierce':    p.pierce += 1; break;
+      case 'vampire':   p.vampire += 3; break;
+      case 'xpmagnet':  p.xpMult *= 1.2; break;
+      case 'shotgun':   p.shotgun += 1; break;
+      case 'homing':    p.homing += 1; break;
+      case 'shield':    p.shield += 1; rebuildOrbs(); break;
+    }
+  }
+
+  function tryPickCard(mx, my) {
+    for (var i = 0; i < game.cards.length; i++) {
+      var c = game.cards[i];
+      if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) {
+        applyUpgrade(c.upgrade);
+        game.cards = [];
+        if (game.advanceAfterLevel) {
+          // a forced boss-kill level-up: proceed to the next wave intro
+          game.advanceAfterLevel = false;
+          beginWave(game.wave + 1);
+        } else {
+          game.gameState = 'playing';
+        }
+        return;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // UPDATE
+  // ---------------------------------------------------------------------------
+  function update(dt) {
+    game.time += dt;
+    game.scanlineOffset = (game.scanlineOffset + 1) % 4;
+    game.blinkTimer += dt;
+    if (game.blinkTimer >= 0.5) { game.blinkTimer = 0; game.blinkOn = !game.blinkOn; }
+    if (game.damageFlash > 0) game.damageFlash -= dt;
+    if (game.shakeTimer > 0) game.shakeTimer -= dt;
+    if (game.whiteFlash > 0) game.whiteFlash -= 1;
+
+    // Wave intro card: freeze logic for 2s, then begin the wave.
+    if (game.gameState === 'waveintro') {
+      game.waveIntroTimer -= dt;
+      if (game.waveIntroTimer <= 0) {
+        game.gameState = 'playing';
+        if (game.bossWave) spawnBoss();
+      }
+      return;
+    }
+
+    if (game.gameState !== 'playing') return;
+
+    var p = game.player;
+
+    // ----- player movement -----
+    var dx = 0, dy = 0;
+    if (keys['KeyW'] || keys['ArrowUp']) dy -= 1;
+    if (keys['KeyS'] || keys['ArrowDown']) dy += 1;
+    if (keys['KeyA'] || keys['ArrowLeft']) dx -= 1;
+    if (keys['KeyD'] || keys['ArrowRight']) dx += 1;
+    p.moving = (dx !== 0 || dy !== 0);
+    if (p.moving) {
+      var len = Math.sqrt(dx * dx + dy * dy);
+      dx /= len; dy /= len;
+      p.x += dx * p.speed * dt;
+      p.y += dy * p.speed * dt;
+      if (dx < 0) p.facing = -1;
+      else if (dx > 0) p.facing = 1;
+      p.walkAnim += dt * 8;
+    }
+    // clamp to play area
+    p.x = clamp(p.x, p.w / 2, W - p.w / 2);
+    p.y = clamp(p.y, p.h / 2, H - p.h / 2);
+
+    // ----- auto attack -----
+    p.attackTimer -= dt;
+    if (p.attackTimer <= 0) {
+      fireWeapon();
+      p.attackTimer = p.attackCooldown;
+    }
+
+    // ----- enemy spawning (normal waves only; boss waves have just the boss) -----
+    if (!game.bossWave) {
+      var spawnInterval = Math.max(0.3, 1.5 - game.wave * 0.05);
+      game.spawnTimer -= dt;
+      if (game.spawnTimer <= 0) {
+        spawnEnemy();
+        game.spawnTimer = spawnInterval;
+      }
+    }
+
+    // ----- update projectiles -----
+    for (var i = game.projectiles.length - 1; i >= 0; i--) {
+      var pr = game.projectiles[i];
+      // homing steering — applied BEFORE the position update, capped at 4deg/frame
+      if (pr.homing > 0) {
+        var ht = findNearestEnemy(pr.x, pr.y);
+        if (ht) {
+          var desired = Math.atan2(ht.y - pr.y, ht.x - pr.x);
+          var cur = Math.atan2(pr.vy, pr.vx);
+          var diff = desired - cur;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          var step = diff * pr.homing;
+          var maxStep = 4 * Math.PI / 180;
+          if (step > maxStep) step = maxStep;
+          else if (step < -maxStep) step = -maxStep;
+          var na = cur + step;
+          var spd = Math.sqrt(pr.vx * pr.vx + pr.vy * pr.vy);
+          pr.vx = Math.cos(na) * spd;
+          pr.vy = Math.sin(na) * spd;
+        }
+      }
+      pr.x += pr.vx * dt;
+      pr.y += pr.vy * dt;
+      if (pr.x < -8 || pr.x > W + 8 || pr.y < -8 || pr.y > H + 8) {
+        game.projectiles.splice(i, 1);
+      }
+    }
+
+    // ----- update enemies -----
+    for (var j = game.enemies.length - 1; j >= 0; j--) {
+      var e = game.enemies[j];
+      if (e.hitFlash > 0) e.hitFlash -= dt;
+      // knockback decays
+      e.x += e.kx * dt;
+      e.y += e.ky * dt;
+      e.kx *= 0.85; e.ky *= 0.85;
+      // chase player
+      var edx = p.x - e.x, edy = p.y - e.y;
+      var ed = Math.sqrt(edx * edx + edy * edy) || 1;
+      e.x += (edx / ed) * e.speed * dt;
+      e.y += (edy / ed) * e.speed * dt;
+
+      // contact with player
+      if (Math.abs(p.x - e.x) < (p.w / 2 + e.w / 2) &&
+          Math.abs(p.y - e.y) < (p.h / 2 + e.h / 2)) {
+        p.hp -= e.contact;
+        game.damageFlash = 0.1;
+        game.shakeTimer = 0.3;
+        playHit();
+        // knock normal enemies back (impulse decays toward ~20px); boss is immovable
+        if (!e.isBoss) {
+          var kdx = (e.x - p.x) / ed;
+          var kdy = (e.y - p.y) / ed;
+          e.kx = kdx * 120;
+          e.ky = kdy * 120;
+        }
+        if (p.hp <= 0) {
+          p.hp = 0;
+          game.gameState = 'gameover';
+        }
+      }
+    }
+
+    // ----- projectile vs enemy collisions -----
+    for (var pi = game.projectiles.length - 1; pi >= 0; pi--) {
+      var proj = game.projectiles[pi];
+      var removed = false;
+      for (var ei = game.enemies.length - 1; ei >= 0; ei--) {
+        var en = game.enemies[ei];
+        if (proj.hitSet.indexOf(en) !== -1) continue;
+        if (Math.abs(proj.x - en.x) < (en.w / 2 + 3) &&
+            Math.abs(proj.y - en.y) < (en.h / 2 + 3)) {
+          en.hp -= proj.damage;
+          en.hitFlash = 0.08;
+          proj.hitSet.push(en);
+          if (en.hp <= 0) {
+            if (en.isBoss) killBoss(ei, en); else killEnemy(ei, en);
+          }
+          if (proj.pierce > 0) {
+            proj.pierce--;
+          } else {
+            game.projectiles.splice(pi, 1);
+            removed = true;
+            break;
+          }
+        }
+      }
+      if (removed) continue;
+    }
+
+    // ----- orbiting shield orbs -----
+    if (p.orbs && p.orbs.length) {
+      for (var oi = 0; oi < p.orbs.length; oi++) {
+        var orb = p.orbs[oi];
+        orb.angle += p.orbSpeed * dt;
+        orb.x = p.x + Math.cos(orb.angle) * p.orbRadius;
+        orb.y = p.y + Math.sin(orb.angle) * p.orbRadius;
+        // collide with enemies (descending so splices are safe)
+        for (var oe = game.enemies.length - 1; oe >= 0; oe--) {
+          var oen = game.enemies[oe];
+          var rr = oen.w / 2 + 6;
+          var odx = orb.x - oen.x, ody = orb.y - oen.y;
+          if (odx * odx + ody * ody < rr * rr) {
+            var until = orb.hitCd[oen.uid] || 0;
+            if (game.time >= until) {
+              oen.hp -= 15;
+              oen.hitFlash = 0.08;
+              orb.hitCd[oen.uid] = game.time + 0.5; // per-orb, per-enemy cooldown
+              if (oen.hp <= 0) {
+                if (oen.isBoss) killBoss(oe, oen); else killEnemy(oe, oen);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ----- update particles -----
+    for (var pa = game.particles.length - 1; pa >= 0; pa--) {
+      var part = game.particles[pa];
+      part.life -= dt;
+      if (part.life <= 0) { game.particles.splice(pa, 1); continue; }
+      part.x += part.vx * dt;
+      part.y += part.vy * dt;
+      part.vx *= 0.92; part.vy *= 0.92;
+    }
+
+    // ----- wave completion (normal waves; boss waves end on boss death) -----
+    if (!game.bossWave && game.waveKills >= game.waveTarget) {
+      beginWave(game.wave + 1);
+    }
+  }
+
+  function killEnemy(index, en) {
+    spawnDeathParticles(en.x, en.y, en.color);
+    var p = game.player;
+    gainXP((en.maxHp / 5) * p.xpMult);
+    if (p.vampire > 0) {
+      p.hp = Math.min(p.maxHp, p.hp + p.vampire);
+    }
+    game.score++;
+    game.waveKills++;
+    game.enemies.splice(index, 1);
+  }
+
+  function killBoss(index, en) {
+    bossExplosion(en.x, en.y);
+    playBossDeath();
+    game.whiteFlash = 3;          // flash white for 3 frames
+    game.shakeTimer = 0.5;
+    game.score++;
+    game.enemies.splice(index, 1);
+    game.boss = null;
+    // boss always grants a level-up, then the next wave intro follows.
+    game.advanceAfterLevel = true;
+    gainXP(xpForNext() - game.xp + 1); // guarantees exactly one level-up
+  }
+
+  // ---------------------------------------------------------------------------
+  // RENDER HELPERS
+  // ---------------------------------------------------------------------------
+  function text(str, x, y, size, color, align) {
+    ctx.font = size + 'px "Press Start 2P"';
+    ctx.textAlign = align || 'left';
+    ctx.textBaseline = 'top';
+    // 1px black shadow
+    ctx.fillStyle = '#000';
+    ctx.fillText(str, x + 1, y + 1);
+    ctx.fillStyle = color;
+    ctx.fillText(str, x, y);
+  }
+
+  function pad(num, len) {
+    var s = '' + num;
+    while (s.length < len) s = '0' + s;
+    return s;
+  }
+
+  // ---------------------------------------------------------------------------
+  // RENDER WORLD
+  // ---------------------------------------------------------------------------
+  function drawFloor() {
+    var useSheet = !useProceduralSprites && sheetReady;
+    for (var i = 0; i < floorTiles.length; i++) {
+      var t = floorTiles[i];
+      if (useSheet) {
+        var tile = t.variant === 2 ? TILE.floorAlt : (t.variant === 1 ? TILE.wall : TILE.floor);
+        drawTile(tile, t.x, t.y, TILE_SIZE, TILE_SIZE, false);
+        if (t.variant === 1) {
+          ctx.fillStyle = 'rgba(0,0,0,0.35)';
+          ctx.fillRect(t.x, t.y, TILE_SIZE, TILE_SIZE);
+        }
+      } else {
+        var sh = t.shade;
+        if (t.variant === 1) sh = Math.floor(sh * 0.5);
+        else if (t.variant === 2) sh = sh + 10;
+        ctx.fillStyle = 'rgb(' + sh + ',' + sh + ',' + (sh + 6) + ')';
+        ctx.fillRect(t.x, t.y, TILE_SIZE, TILE_SIZE);
+        // subtle grid lines
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';
+        ctx.fillRect(t.x, t.y, TILE_SIZE, 1);
+        ctx.fillRect(t.x, t.y, 1, TILE_SIZE);
+      }
+    }
+  }
+
+  function drawPlayer() {
+    var p = game.player;
+    var dx = Math.round(p.x - 8);
+    var dy = Math.round(p.y - 8);
+    var bob = (p.moving && Math.floor(p.walkAnim) % 2 === 0) ? -1 : 0;
+    var tile = (p.moving && Math.floor(p.walkAnim) % 2 === 0) ? TILE.playerWalk : TILE.playerIdle;
+    var drew = drawTile(tile, dx, dy + bob, 16, 16, p.facing === -1);
+    if (!drew) {
+      // procedural: 12x16 white body + 4x4 cyan head
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(Math.round(p.x - 6), Math.round(p.y - 8) + bob, 12, 16);
+      ctx.fillStyle = '#00e5ff';
+      ctx.fillRect(Math.round(p.x - 2), Math.round(p.y - 8) + bob, 4, 4);
+      // a little eye to show facing
+      ctx.fillStyle = '#000';
+      ctx.fillRect(Math.round(p.x - 2 + (p.facing === 1 ? 2 : 0)), Math.round(p.y - 2) + bob, 2, 2);
+    }
+  }
+
+  function drawEnemy(e) {
+    if (e.isBoss) { drawBoss(e); return; }
+    var dx = Math.round(e.x - 8);
+    var dy = Math.round(e.y - 8);
+    var drew = drawTile(e.tile, dx, dy, 16, 16, false);
+    if (drew) {
+      if (e.hitFlash > 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.fillRect(dx, dy, 16, 16);
+      }
+    } else {
+      var col = e.hitFlash > 0 ? '#fff' : e.color;
+      if (e.type === 'slime') {
+        // green blob
+        ctx.fillStyle = col;
+        ctx.fillRect(Math.round(e.x - 7), Math.round(e.y - 3), 14, 9);
+        ctx.fillRect(Math.round(e.x - 5), Math.round(e.y - 6), 10, 4);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(Math.round(e.x - 3), Math.round(e.y - 1), 2, 2);
+        ctx.fillRect(Math.round(e.x + 1), Math.round(e.y - 1), 2, 2);
+      } else {
+        ctx.fillStyle = col;
+        ctx.fillRect(Math.round(e.x - 7), Math.round(e.y - 7), 14, 14);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(Math.round(e.x - 4), Math.round(e.y - 3), 2, 2);
+        ctx.fillRect(Math.round(e.x + 2), Math.round(e.y - 3), 2, 2);
+      }
+    }
+    // health bar above enemy (16x3)
+    var bx = Math.round(e.x - 8), by = Math.round(e.y - 13);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(bx - 1, by - 1, 18, 5);
+    ctx.fillStyle = '#3a0000';
+    ctx.fillRect(bx, by, 16, 3);
+    ctx.fillStyle = '#ff2d2d';
+    ctx.fillRect(bx, by, Math.round(16 * (e.hp / e.maxHp)), 3);
+  }
+
+  function drawBoss(e) {
+    // pulse between 30 and 34px on a 1-second sine cycle
+    var ds = 32 + Math.sin(game.time * Math.PI * 2) * 2;
+    var dsr = Math.round(ds);
+    var bx = Math.round(e.x - dsr / 2);
+    var by = Math.round(e.y - dsr / 2);
+    var drew = drawTile(e.tile, bx, by, dsr, dsr, false);
+    if (drew) {
+      if (e.hitFlash > 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.fillRect(bx, by, dsr, dsr);
+      }
+    } else {
+      ctx.fillStyle = e.hitFlash > 0 ? '#fff' : e.color;
+      ctx.fillRect(bx, by, dsr, dsr);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(bx + 6, by + 8, 4, 4);
+      ctx.fillRect(bx + dsr - 10, by + 8, 4, 4);
+    }
+    // boss uses the big dedicated HUD bar, so no small bar here.
+  }
+
+  function drawOrbs() {
+    var p = game.player;
+    if (!p.orbs || !p.orbs.length) return;
+    for (var i = 0; i < p.orbs.length; i++) {
+      var orb = p.orbs[i];
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(Math.round(orb.x - 3), Math.round(orb.y - 3), 6, 6);
+      ctx.fillStyle = '#00e5ff';
+      ctx.fillRect(Math.round(orb.x - 2), Math.round(orb.y - 2), 4, 4);
+    }
+  }
+
+  function drawProjectiles() {
+    for (var i = 0; i < game.projectiles.length; i++) {
+      var pr = game.projectiles[i];
+      // glow
+      ctx.fillStyle = 'rgba(255,230,0,0.3)';
+      ctx.fillRect(Math.round(pr.x - 3), Math.round(pr.y - 3), 6, 6);
+      // core
+      ctx.fillStyle = '#ffe600';
+      ctx.fillRect(Math.round(pr.x - 2), Math.round(pr.y - 2), 4, 4);
+    }
+  }
+
+  function drawParticles() {
+    for (var i = 0; i < game.particles.length; i++) {
+      var p = game.particles[i];
+      ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+      ctx.fillStyle = p.color;
+      var ps = p.size || 2;
+      ctx.fillRect(Math.round(p.x), Math.round(p.y), ps, ps);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function renderWorld() {
+    ctx.save();
+    // screen shake
+    if (game.shakeTimer > 0) {
+      ctx.translate(randInt(-3, 3), randInt(-3, 3));
+    }
+    drawFloor();
+    drawParticles();
+    // draw enemies sorted by y for a touch of depth
+    var sorted = game.enemies.slice().sort(function (a, b) { return a.y - b.y; });
+    for (var i = 0; i < sorted.length; i++) drawEnemy(sorted[i]);
+    drawPlayer();
+    drawOrbs();
+    drawProjectiles();
+    ctx.restore();
+
+    // damage flash overlay
+    if (game.damageFlash > 0) {
+      ctx.fillStyle = 'rgba(255,0,0,0.2)';
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // HUD
+  // ---------------------------------------------------------------------------
+  function renderHUD() {
+    var p = game.player;
+
+    // ----- HP bar (top-left) -----
+    text('HP', 6, 6, 6, '#ffffff');
+    var segs = 20, segW = 8, segH = 6, gap = 1;
+    var hpRatio = clamp(p.hp / p.maxHp, 0, 1);
+    var filled = Math.round(segs * hpRatio);
+    for (var i = 0; i < segs; i++) {
+      var sx = 6 + i * (segW + gap);
+      var sy = 16;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(sx + 1, sy + 1, segW, segH);
+      ctx.fillStyle = i < filled ? '#ff2d2d' : '#3a3a3a';
+      ctx.fillRect(sx, sy, segW, segH);
+    }
+
+    // ----- wave (top-centre) -----
+    text('WAVE ' + pad(game.wave, 2), W / 2, 6, 12, '#ffe600', 'center');
+
+    // ----- kills (top-right) -----
+    text('KILLS: ' + pad(game.score, 4), W - 6, 6, 8, '#ffffff', 'right');
+
+    // ----- XP bar (bottom-left, full width) -----
+    text('LVL ' + pad(game.level, 2), 6, H - 24, 6, '#ffffff');
+    var barX = 6, barY = H - 14, barW = W - 12, barH = 8;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+    ctx.fillStyle = '#0a2a33';
+    ctx.fillRect(barX, barY, barW, barH);
+    var xpRatio = clamp(game.xp / xpForNext(), 0, 1);
+    ctx.fillStyle = '#00e5ff';
+    ctx.fillRect(barX, barY, Math.round(barW * xpRatio), barH);
+
+    // ----- active upgrades (bottom-right) -----
+    var keysList = Object.keys(p.upgradesTaken);
+    var ty = H - 30 - keysList.length * 8;
+    for (var k = 0; k < keysList.length; k++) {
+      var id = keysList[k];
+      var def = null;
+      for (var u = 0; u < UPGRADES.length; u++) if (UPGRADES[u].id === id) def = UPGRADES[u];
+      var label = (def ? def.name : id) + ' x' + p.upgradesTaken[id];
+      text(label, W - 6, ty + k * 8, 6, '#bbbbbb', 'right');
+    }
+
+    // ----- boss health bar (only while a boss is alive) -----
+    if (game.bossWave && game.boss) {
+      var bw = 200, bh = 10, bx = (W - bw) / 2, by = 24;
+      text('BOSS', bx - 4, by + 2, 6, '#ff2d2d', 'right');
+      ctx.fillStyle = '#FFD700';                 // 1px gold border
+      ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
+      ctx.fillStyle = '#3a0000';                 // dark red bg
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = '#ff2d2d';                 // bright red fill
+      ctx.fillRect(bx, by, Math.round(bw * clamp(game.boss.hp / game.boss.maxHp, 0, 1)), bh);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SCANLINES
+  // ---------------------------------------------------------------------------
+  function drawScanlines() {
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (var y = 0; y < H; y += 4) {
+      ctx.moveTo(0, y + 0.5);
+      ctx.lineTo(W, y + 0.5);
+    }
+    ctx.stroke();
+  }
+
+  function drawAnimatedScanlines(opacity) {
+    ctx.strokeStyle = 'rgba(255,255,255,' + opacity + ')';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (var y = -4 + game.scanlineOffset; y < H; y += 4) {
+      ctx.moveTo(0, y + 0.5);
+      ctx.lineTo(W, y + 0.5);
+    }
+    ctx.stroke();
+  }
+
+  // ---------------------------------------------------------------------------
+  // SCREENS
+  // ---------------------------------------------------------------------------
+  function renderTitle() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    drawAnimatedScanlines(0.05);
+
+    // title with red drop shadow
+    ctx.font = '16px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#b00';
+    ctx.fillText('CRYPTVAULT', W / 2 + 2, 70 + 2);
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText('CRYPTVAULT', W / 2, 70);
+
+    text('TOP-DOWN ROGUELIKE', W / 2, 100, 8, '#ffffff', 'center');
+
+    if (game.blinkOn) {
+      text('PRESS ENTER OR CLICK TO BEGIN', W / 2, 160, 6, '#888888', 'center');
+    }
+    text('WASD / ARROWS TO MOVE — AUTO-FIRE', W / 2, 200, 6, '#555555', 'center');
+  }
+
+  function renderGameOver() {
+    // dark red tint background
+    ctx.fillStyle = '#1a0000';
+    ctx.fillRect(0, 0, W, H);
+    drawAnimatedScanlines(0.05);
+
+    text('YOU DIED', W / 2, 70, 16, '#ff2d2d', 'center');
+    text('WAVE ' + pad(game.wave, 2) + '   KILLS ' + pad(game.score, 4), W / 2, 110, 8, '#ffffff', 'center');
+    if (game.blinkOn) {
+      text('PRESS ENTER OR CLICK TO RESTART', W / 2, 170, 6, '#ffffff', 'center');
+    }
+  }
+
+  function renderLevelUp() {
+    // render frozen world behind
+    renderWorld();
+    renderHUD();
+    // dark overlay
+    ctx.fillStyle = 'rgba(0,0,10,0.75)';
+    ctx.fillRect(0, 0, W, H);
+
+    text('LEVEL UP!  CHOOSE AN UPGRADE', W / 2, 30, 8, '#FFD700', 'center');
+
+    for (var i = 0; i < game.cards.length; i++) {
+      var c = game.cards[i];
+      var hover = mouse.x >= c.x && mouse.x <= c.x + c.w &&
+                  mouse.y >= c.y && mouse.y <= c.y + c.h;
+
+      // hover glow border (2px outside)
+      if (hover) {
+        ctx.fillStyle = 'rgba(255,215,0,0.35)';
+        ctx.fillRect(c.x - 4, c.y - 4, c.w + 8, c.h + 8);
+      }
+      // gold border
+      ctx.fillStyle = '#FFD700';
+      ctx.fillRect(c.x - 2, c.y - 2, c.w + 4, c.h + 4);
+      // dark bg
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(c.x, c.y, c.w, c.h);
+
+      // accent stripes in upgrade colour
+      ctx.fillStyle = c.upgrade.color;
+      ctx.fillRect(c.x, c.y, c.w, 6);
+      ctx.fillRect(c.x, c.y + c.h - 6, c.w, 6);
+
+      // icon block
+      ctx.fillStyle = c.upgrade.color;
+      ctx.fillRect(c.x + c.w / 2 - 16, c.y + 30, 32, 32);
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(c.x + c.w / 2 - 16, c.y + 30, 32, 16);
+
+      // name + description (word-wrapped)
+      wrapText(c.upgrade.name, c.x + c.w / 2, c.y + 78, 8, '#ffffff', c.w - 12);
+      wrapText(c.upgrade.desc, c.x + c.w / 2, c.y + 104, 6, '#bbbbbb', c.w - 12);
+
+      // count owned
+      var owned = game.player.upgradesTaken[c.upgrade.id] || 0;
+      if (owned > 0) {
+        text('OWNED x' + owned, c.x + c.w / 2, c.y + c.h - 20, 6, '#888888', 'center');
+      }
+    }
+  }
+
+  function renderWaveIntro() {
+    // frozen world behind a translucent overlay
+    renderWorld();
+    renderHUD();
+    ctx.fillStyle = 'rgba(0,0,10,0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    var cw = 240, ch = 100, cx = (W - cw) / 2, cy = (H - ch) / 2;
+    ctx.fillStyle = '#FFD700';                 // 2px gold border
+    ctx.fillRect(cx - 2, cy - 2, cw + 4, ch + 4);
+    ctx.fillStyle = '#0d0d1a';                 // dark background
+    ctx.fillRect(cx, cy, cw, ch);
+
+    text('WAVE', W / 2, cy + 12, 8, '#FFD700', 'center');
+    text(pad(game.wave, 2), W / 2, cy + 28, 20, '#FFD700', 'center');
+
+    if (game.bossWave) {
+      if (game.blinkOn) {
+        text('! BOSS WAVE !', W / 2, cy + 72, 8, '#ff2d2d', 'center');
+      }
+    } else {
+      text('~' + game.waveTarget + ' ENEMIES', W / 2, cy + 76, 6, '#ffffff', 'center');
+    }
+  }
+
+  // simple word-wrap renderer centred at cx
+  function wrapText(str, cx, y, size, color, maxW) {
+    ctx.font = size + 'px "Press Start 2P"';
+    var words = str.split(' ');
+    var lines = [];
+    var line = '';
+    for (var i = 0; i < words.length; i++) {
+      var test = line ? line + ' ' + words[i] : words[i];
+      if (ctx.measureText(test).width > maxW && line) {
+        lines.push(line);
+        line = words[i];
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    for (var l = 0; l < lines.length; l++) {
+      text(lines[l], cx, y + l * (size + 3), size, color, 'center');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // MAIN RENDER
+  // ---------------------------------------------------------------------------
+  function render() {
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    if (game.gameState === 'title') {
+      renderTitle();
+    } else if (game.gameState === 'gameover') {
+      renderGameOver();
+      drawScanlines();
+    } else if (game.gameState === 'levelup') {
+      renderLevelUp();
+      drawScanlines();
+    } else if (game.gameState === 'waveintro') {
+      renderWaveIntro();
+      drawScanlines();
+    } else {
+      renderWorld();
+      renderHUD();
+      drawScanlines();
+    }
+
+    // boss-death white flash, drawn on top of everything for a few frames
+    if (game.whiteFlash > 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // GAME LOOP
+  // ---------------------------------------------------------------------------
+  var lastTime = performance.now();
+  function loop(ts) {
+    var dt = (ts - lastTime) / 1000;
+    lastTime = ts;
+    if (dt > 0.05) dt = 0.05; // cap to avoid spiral of death
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>

@@ -257,13 +257,7 @@
 
   function handleConfirm() {
     if (game.gameState === 'title') {
-      if (runData.unlockedClasses) {
-        enterClassSelect();
-      } else {
-        // first-run experience: no class screen, default stats
-        currentClass = 'warrior';
-        startGame();
-      }
+      enterClassSelect();
     } else if (game.gameState === 'gameover') {
       game.gameState = 'title';
     }
@@ -552,23 +546,15 @@
     game.curseSpeedMult = 1;
     game.cultistLevel = 0;
     game.player = makePlayer();
-    // apply class stats only once classes are unlocked — the first-run
-    // experience uses the untouched default player.
-    if (runData.unlockedClasses) {
-      var cls = null;
-      for (var ci = 0; ci < CLASSES.length; ci++) {
-        if (CLASSES[ci].id === currentClass) cls = CLASSES[ci];
-      }
-      if (cls) {
-        var pl = game.player;
-        pl.maxHp = cls.hp; pl.hp = cls.hp;
-        pl.speed = cls.speed;
-        pl.damage = cls.damage;
-        pl.attackCooldown = cls.cooldown;
-        pl.pierce = cls.pierce;
-        pl.homingBase = cls.homingBase;
-      }
-    }
+    // every run starts with the chosen class's stats
+    var cls = classDef(currentClass);
+    var pl = game.player;
+    pl.maxHp = cls.hp; pl.hp = cls.hp;
+    pl.speed = cls.speed;
+    pl.damage = cls.damage;
+    pl.attackCooldown = cls.cooldown;
+    pl.pierce = cls.pierce;
+    pl.homingBase = cls.homingBase;
     buildFloor();
     beginWave(1);
   }
@@ -1214,7 +1200,6 @@
     if (game.level > runData.bestLevel) { runData.bestLevel = game.level; game.newRecord = true; }
     runData.totalRuns++;
     runData.totalKills += game.score;
-    if (game.wave >= 3) runData.unlockedClasses = true; // permanent unlock
     saveRunData();
   }
 
@@ -1335,9 +1320,8 @@
     var dx = Math.round(p.x - 8);
     var dy = Math.round(p.y - 8);
     var bob = (p.moving && Math.floor(p.walkAnim) % 2 === 0) ? -1 : 0;
-    // each class has its own hero sprite; the original wizard is the
-    // default look until classes are unlocked
-    var tile = runData.unlockedClasses ? classDef(currentClass).tile : TILE.playerIdle;
+    // each class has its own hero sprite
+    var tile = classDef(currentClass).tile;
     var drew = drawTile(tile, dx, dy + bob, 16, 16, p.facing === -1);
     if (!drew) {
       // procedural: 12x16 white body + 4x4 cyan head
@@ -1349,11 +1333,9 @@
       ctx.fillStyle = '#000';
       ctx.fillRect(Math.round(p.x - 2 + (p.facing === 1 ? 2 : 0)), Math.round(p.y - 2) + bob, 2, 2);
     }
-    // class-coloured marker under the hero (only once classes are unlocked)
-    if (runData.unlockedClasses) {
-      ctx.fillStyle = classDef(currentClass).color;
-      ctx.fillRect(Math.round(p.x - 6), Math.round(p.y + 9), 12, 2);
-    }
+    // class-coloured marker under the hero
+    ctx.fillStyle = classDef(currentClass).color;
+    ctx.fillRect(Math.round(p.x - 6), Math.round(p.y + 9), 12, 2);
   }
 
   // Cultists are always drawn procedurally — a hooded purple figure that
@@ -1644,12 +1626,7 @@
       text('WAVE ' + pad(runData.bestWave, 2), px + 33, py + 34, 6, '#FFD700', 'center');
       text('KILLS ' + pad(runData.bestKills, 4), W / 2, py + 34, 6, '#ffffff', 'center');
       text('LVL ' + pad(runData.bestLevel, 2), px + 167, py + 34, 6, '#00e5ff', 'center');
-      if (!runData.unlockedClasses) {
-        text('REACH WAVE 3 TO UNLOCK CLASSES', W / 2, 248, 6, '#996600', 'center');
-        text('WASD / ARROWS TO MOVE — AUTO-FIRE', W / 2, 258, 6, '#555555', 'center');
-      } else {
-        text('WASD / ARROWS TO MOVE — AUTO-FIRE', W / 2, 252, 6, '#555555', 'center');
-      }
+      text('WASD / ARROWS TO MOVE — AUTO-FIRE', W / 2, 252, 6, '#555555', 'center');
     } else {
       // clean first-time experience: no stats panel at all
       text('WASD / ARROWS TO MOVE — AUTO-FIRE', W / 2, 200, 6, '#555555', 'center');

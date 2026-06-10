@@ -101,7 +101,11 @@
     boss:       { x: 32, y: 144 }, // red demon, drawn at 32x32
     floor:      { x: 16, y: 64 },  // tan dungeon ground
     floorAlt:   { x: 32, y: 64 },  // tan variant
-    wall:       { x: 16, y: 64 }   // darkened with overlay for shadow tiles
+    wall:       { x: 16, y: 64 },  // darkened with overlay for shadow tiles
+    // class heroes (verified by visual inspection of the packed sheet)
+    heroWarrior: { x: 48, y: 112 }, // horned-helm viking
+    heroRogue:   { x: 64, y: 128 }, // grey-hooded figure
+    heroMage:    { x: 0,  y: 112 }  // purple wizard (the original hero)
   };
 
   // Draw a 16x16 sheet tile, optionally flipped horizontally.
@@ -210,6 +214,13 @@
     ensureAudio();
     keys[e.code] = true;
     if (e.code === 'Enter') handleConfirm();
+    if (game.gameState === 'classselect') {
+      var classKeys = { Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 };
+      if (e.code in classKeys) {
+        currentClass = CLASSES[classKeys[e.code]].id;
+        startGame();
+      }
+    }
     // Prevent arrow keys / space scrolling the page.
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].indexOf(e.code) !== -1) {
       e.preventDefault();
@@ -344,9 +355,9 @@
   // STARTING CLASSES (unlocked by reaching wave 3 once)
   // ---------------------------------------------------------------------------
   var CLASSES = [
-    { id: 'warrior', name: 'WARRIOR', color: '#cc3333', hp: 200, speed: 60,  damage: 32, cooldown: 1.2, pierce: 0, homingBase: 0,    bars: [5, 2, 4] },
-    { id: 'rogue',   name: 'ROGUE',   color: '#33cc66', hp: 70,  speed: 125, damage: 14, cooldown: 0.4, pierce: 0, homingBase: 0,    bars: [2, 5, 2] },
-    { id: 'mage',    name: 'MAGE',    color: '#6633cc', hp: 80,  speed: 70,  damage: 40, cooldown: 1.0, pierce: 1, homingBase: 0.06, bars: [2, 2, 5] }
+    { id: 'warrior', name: 'WARRIOR', color: '#cc3333', hp: 200, speed: 60,  damage: 32, cooldown: 1.2, pierce: 0, homingBase: 0,    bars: [5, 2, 4], tile: TILE.heroWarrior },
+    { id: 'rogue',   name: 'ROGUE',   color: '#33cc66', hp: 70,  speed: 125, damage: 14, cooldown: 0.4, pierce: 0, homingBase: 0,    bars: [2, 5, 2], tile: TILE.heroRogue },
+    { id: 'mage',    name: 'MAGE',    color: '#6633cc', hp: 80,  speed: 70,  damage: 40, cooldown: 1.0, pierce: 1, homingBase: 0.06, bars: [2, 2, 5], tile: TILE.heroMage }
   ];
 
   function classDef(id) {
@@ -1324,7 +1335,9 @@
     var dx = Math.round(p.x - 8);
     var dy = Math.round(p.y - 8);
     var bob = (p.moving && Math.floor(p.walkAnim) % 2 === 0) ? -1 : 0;
-    var tile = (p.moving && Math.floor(p.walkAnim) % 2 === 0) ? TILE.playerWalk : TILE.playerIdle;
+    // each class has its own hero sprite; the original wizard is the
+    // default look until classes are unlocked
+    var tile = runData.unlockedClasses ? classDef(currentClass).tile : TILE.playerIdle;
     var drew = drawTile(tile, dx, dy + bob, 16, 16, p.facing === -1);
     if (!drew) {
       // procedural: 12x16 white body + 4x4 cyan head
@@ -1631,7 +1644,12 @@
       text('WAVE ' + pad(runData.bestWave, 2), px + 33, py + 34, 6, '#FFD700', 'center');
       text('KILLS ' + pad(runData.bestKills, 4), W / 2, py + 34, 6, '#ffffff', 'center');
       text('LVL ' + pad(runData.bestLevel, 2), px + 167, py + 34, 6, '#00e5ff', 'center');
-      text('WASD / ARROWS TO MOVE — AUTO-FIRE', W / 2, 252, 6, '#555555', 'center');
+      if (!runData.unlockedClasses) {
+        text('REACH WAVE 3 TO UNLOCK CLASSES', W / 2, 248, 6, '#996600', 'center');
+        text('WASD / ARROWS TO MOVE — AUTO-FIRE', W / 2, 258, 6, '#555555', 'center');
+      } else {
+        text('WASD / ARROWS TO MOVE — AUTO-FIRE', W / 2, 252, 6, '#555555', 'center');
+      }
     } else {
       // clean first-time experience: no stats panel at all
       text('WASD / ARROWS TO MOVE — AUTO-FIRE', W / 2, 200, 6, '#555555', 'center');
@@ -1775,7 +1793,14 @@
       ctx.fillRect(c.x, c.y, c.w, c.h);
 
       text(cls.name, c.x + c.w / 2, c.y + 10, 8, '#ffffff', 'center');
-      drawClassIcon(cls.id, c.x + c.w / 2 - 20, c.y + 30);
+      if (!useProceduralSprites && sheetReady) {
+        // hero sprite + weapon side by side
+        drawTile(cls.tile, c.x + c.w / 2 - 38, c.y + 32, 36, 36, false);
+        drawClassIcon(cls.id, c.x + c.w / 2 + 2, c.y + 30);
+      } else {
+        drawClassIcon(cls.id, c.x + c.w / 2 - 20, c.y + 30);
+      }
+      text(String(i + 1), c.x + 8, c.y + 8, 6, '#666666');
 
       // three 5-segment stat bars
       for (var b = 0; b < 3; b++) {
@@ -1788,7 +1813,7 @@
       }
     }
 
-    text('CLICK A CLASS TO BEGIN', W / 2, 244, 6, '#888888', 'center');
+    text('CLICK A CLASS OR PRESS 1-3 TO BEGIN', W / 2, 244, 6, '#888888', 'center');
   }
 
   function renderWaveIntro() {

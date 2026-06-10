@@ -308,17 +308,17 @@
   // UPGRADE DEFINITIONS
   // ---------------------------------------------------------------------------
   var UPGRADES = [
-    { id: 'multishot', name: 'MULTI-SHOT', desc: '+1 projectile per shot', color: '#ff6b6b' },
-    { id: 'atkspeed',  name: 'ATTACK SPD', desc: 'Fire 0.1s faster', color: '#feca57' },
-    { id: 'damage',    name: 'DMG BOOST',  desc: '+15 damage per shot', color: '#ff9ff3' },
-    { id: 'health',    name: 'HEALTH UP',  desc: '+30 max HP, heal 30', color: '#1dd1a1' },
-    { id: 'movespeed', name: 'MOVE SPD',   desc: '+20 move speed', color: '#54a0ff' },
-    { id: 'pierce',    name: 'PIERCE',     desc: 'Shots pierce +1 foe', color: '#48dbfb' },
-    { id: 'vampire',   name: 'VAMPIRE',    desc: 'Heal 3 HP per kill', color: '#ee5253' },
-    { id: 'xpmagnet',  name: 'XP MAGNET',  desc: '+20% XP from kills', color: '#5f27cd' },
-    { id: 'shotgun',   name: 'SHOTGUN',    desc: '5-shot 60deg blast', color: '#ff9f1c' },
-    { id: 'homing',    name: 'HOMING SHOT',desc: 'Shots seek foes',    color: '#2ec4b6' },
-    { id: 'shield',    name: 'ORBIT SHIELD',desc:'Orbs circle you',    color: '#00e5ff' },
+    { id: 'multishot', name: 'MULTI-SHOT', desc: '+1 projectile per shot', con: '-15% DAMAGE',     color: '#ff6b6b' },
+    { id: 'atkspeed',  name: 'ATTACK SPD', desc: 'Fire 0.1s faster',       con: 'SHOTS 10% SLOWER', color: '#feca57' },
+    { id: 'damage',    name: 'DMG BOOST',  desc: '+15 damage per shot',    con: 'FIRE 0.05s SLOWER', color: '#ff9ff3' },
+    { id: 'health',    name: 'HEALTH UP',  desc: '+30 max HP, heal 30',    con: '-5 MOVE SPEED',   color: '#1dd1a1' },
+    { id: 'movespeed', name: 'MOVE SPD',   desc: '+20 move speed',         con: '-10 MAX HP',      color: '#54a0ff' },
+    { id: 'pierce',    name: 'PIERCE',     desc: 'Shots pierce +1 foe',    con: '-10% DAMAGE',     color: '#48dbfb' },
+    { id: 'vampire',   name: 'VAMPIRE',    desc: 'Heal 3 HP per kill',     con: '-15 MAX HP',      color: '#ee5253' },
+    { id: 'xpmagnet',  name: 'XP MAGNET',  desc: '+20% XP from kills',     con: 'FOES +8% SPEED',  color: '#5f27cd' },
+    { id: 'shotgun',   name: 'SHOTGUN',    desc: '5-shot 60deg blast',     con: 'FIRE 0.1s SLOWER', color: '#ff9f1c' },
+    { id: 'homing',    name: 'HOMING SHOT',desc: 'Shots seek foes',        con: 'SHOTS 15% SLOWER', color: '#2ec4b6' },
+    { id: 'shield',    name: 'ORBIT SHIELD',desc:'Orbs circle you',        con: '-8 MOVE SPEED',   color: '#00e5ff' },
     // cursed upgrades: a strong boost with a permanent downside
     { id: 'greed',       name: 'GREED',        desc: '+50% XP gain',  con: 'FOES +30% HP',      color: '#FFD700', cursed: true },
     { id: 'darkpact',    name: 'DARK PACT',    desc: '+1 projectile', con: 'CULTISTS HUNT YOU', color: '#9b59b6', cursed: true },
@@ -512,6 +512,7 @@
       // upgrade-driven stats
       projectiles: 1,
       damage: 20,
+      shotSpeed: 200,    // projectile velocity, reduced by some upgrade cons
       pierce: 0,
       homingBase: 0,     // innate homing (mage class) without the upgrade
       vampire: 0,
@@ -748,8 +749,8 @@
   function spawnProjectile(p, ang, dmg) {
     game.projectiles.push({
       x: p.x, y: p.y,
-      vx: Math.cos(ang) * 200,
-      vy: Math.sin(ang) * 200,
+      vx: Math.cos(ang) * p.shotSpeed,
+      vy: Math.sin(ang) * p.shotSpeed,
       damage: dmg,
       pierce: p.pierce,
       // homing strength: 0.08 base, +0.04 per extra pick; mage has an
@@ -829,17 +830,31 @@
     var p = game.player;
     p.upgradesTaken[u.id] = (p.upgradesTaken[u.id] || 0) + 1;
     switch (u.id) {
-      case 'multishot': p.projectiles = Math.min(5, p.projectiles + 1); break;
-      case 'atkspeed':  p.attackCooldown = Math.max(0.2, p.attackCooldown - 0.1); break;
-      case 'damage':    p.damage += 15; break;
-      case 'health':    p.maxHp += 30; p.hp = Math.min(p.maxHp, p.hp + 30); break;
-      case 'movespeed': p.speed += 20; break;
-      case 'pierce':    p.pierce += 1; break;
-      case 'vampire':   p.vampire += 3; break;
-      case 'xpmagnet':  p.xpMult *= 1.2; break;
-      case 'shotgun':   p.shotgun += 1; break;
-      case 'homing':    p.homing += 1; break;
-      case 'shield':    p.shield += 1; rebuildOrbs(); break;
+      // every upgrade carries a con; clamps keep heavy stacking survivable
+      case 'multishot': p.projectiles = Math.min(5, p.projectiles + 1);
+                        p.damage = Math.max(5, Math.round(p.damage * 0.85)); break;
+      case 'atkspeed':  p.attackCooldown = Math.max(0.2, p.attackCooldown - 0.1);
+                        p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;
+      case 'damage':    p.damage += 15;
+                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
+      case 'health':    p.maxHp += 30; p.hp = Math.min(p.maxHp, p.hp + 30);
+                        p.speed = Math.max(40, p.speed - 5); break;
+      case 'movespeed': p.speed += 20;
+                        p.maxHp = Math.max(30, p.maxHp - 10);
+                        p.hp = Math.min(p.hp, p.maxHp); break;
+      case 'pierce':    p.pierce += 1;
+                        p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
+      case 'vampire':   p.vampire += 3;
+                        p.maxHp = Math.max(30, p.maxHp - 15);
+                        p.hp = Math.min(p.hp, p.maxHp); break;
+      case 'xpmagnet':  p.xpMult *= 1.2;
+                        game.curseSpeedMult *= 1.08; break;
+      case 'shotgun':   p.shotgun += 1;
+                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.1); break;
+      case 'homing':    p.homing += 1;
+                        p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.85)); break;
+      case 'shield':    p.shield += 1; rebuildOrbs();
+                        p.speed = Math.max(40, p.speed - 8); break;
       // cursed upgrades — the downside is permanent for the rest of the run
       case 'greed':       p.xpMult *= 1.5; game.curseHpMult *= 1.3; break;
       case 'darkpact':    p.projectiles = Math.min(6, p.projectiles + 1); game.cultistLevel++; break;
@@ -1720,13 +1735,13 @@
       wrapText(c.upgrade.name, c.x + c.w / 2, c.y + 78, 8, '#ffffff', c.w - 12);
       wrapText(c.upgrade.desc, c.x + c.w / 2, c.y + 104, 6, '#bbbbbb', c.w - 12);
       if (c.upgrade.con) {
-        wrapText('BUT: ' + c.upgrade.con, c.x + c.w / 2, c.y + 120, 6, '#ff5555', c.w - 12);
+        wrapText('BUT: ' + c.upgrade.con, c.x + c.w / 2, c.y + 124, 6, '#ff5555', c.w - 12);
       }
 
       // count owned
       var owned = game.player.upgradesTaken[c.upgrade.id] || 0;
       if (owned > 0) {
-        text('OWNED x' + owned, c.x + c.w / 2, c.y + c.h - 20, 6, '#888888', 'center');
+        text('OWNED x' + owned, c.x + c.w / 2, c.y + c.h - 13, 6, '#888888', 'center');
       }
     }
   }

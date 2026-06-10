@@ -214,6 +214,10 @@
     ensureAudio();
     keys[e.code] = true;
     if (e.code === 'Enter') handleConfirm();
+    if (e.code === 'KeyP' || e.code === 'Escape') {
+      if (game.gameState === 'playing') game.gameState = 'paused';
+      else if (game.gameState === 'paused') game.gameState = 'playing';
+    }
     if (game.gameState === 'classselect') {
       var classKeys = { Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 };
       if (e.code in classKeys) {
@@ -252,6 +256,13 @@
       tryPickCard(p.x, p.y);
     } else if (game.gameState === 'classselect') {
       tryPickClass(p.x, p.y);
+    } else if (game.gameState === 'playing') {
+      // pause button hit-box (top-right, under the kill counter)
+      if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 18 && p.y <= 38) {
+        game.gameState = 'paused';
+      }
+    } else if (game.gameState === 'paused') {
+      game.gameState = 'playing';
     }
   });
 
@@ -1529,6 +1540,18 @@
     // ----- kills (top-right) -----
     text('KILLS: ' + pad(game.score, 4), W - 6, 6, 8, '#ffffff', 'right');
 
+    // ----- pause button (clickable; P/ESC also work) -----
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(W - 23, 19, 18, 18);
+    ctx.fillStyle = '#888888';
+    ctx.fillRect(W - 23, 19, 18, 1);
+    ctx.fillRect(W - 23, 36, 18, 1);
+    ctx.fillRect(W - 23, 19, 1, 18);
+    ctx.fillRect(W - 6, 19, 1, 18);
+    ctx.fillStyle = '#cccccc';
+    ctx.fillRect(W - 18, 23, 3, 10);
+    ctx.fillRect(W - 13, 23, 3, 10);
+
     // ----- XP bar (bottom-left, full width) -----
     text('LVL ' + pad(game.level, 2), 6, H - 24, 6, '#ffffff');
     var barX = 6, barY = H - 14, barW = W - 12, barH = 8;
@@ -1860,6 +1883,16 @@
       drawScanlines();
     } else if (game.gameState === 'waveintro') {
       renderWaveIntro();
+      drawScanlines();
+    } else if (game.gameState === 'paused') {
+      renderWorld();
+      renderHUD();
+      ctx.fillStyle = 'rgba(0,0,10,0.65)';
+      ctx.fillRect(0, 0, W, H);
+      text('PAUSED', W / 2, 105, 16, '#FFD700', 'center');
+      if (game.blinkOn) {
+        text('P / ESC / CLICK TO RESUME', W / 2, 140, 6, '#bbbbbb', 'center');
+      }
       drawScanlines();
     } else {
       renderWorld();

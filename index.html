@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CRYPTVAULT</title>
+<title>KRYPTVAULT</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
@@ -221,7 +221,11 @@
   // MUSIC — two-channel chiptune loop scheduled ahead via WebAudio
   // ---------------------------------------------------------------------------
   var musicMuted = false;
-  try { musicMuted = localStorage.getItem('cryptvault_muted') === '1'; } catch (e) {}
+  try {
+    // fall back to the pre-rename key so old players keep their setting
+    musicMuted = (localStorage.getItem('kryptvault_muted') ||
+                  localStorage.getItem('cryptvault_muted')) === '1';
+  } catch (e) {}
 
   var music = { playing: false, step: 0, nextTime: 0, timer: null };
   var MUSIC_BASS = [110, 110, 131, 131, 98, 98, 123, 123];
@@ -265,7 +269,7 @@
 
   function toggleMute() {
     musicMuted = !musicMuted;
-    try { localStorage.setItem('cryptvault_muted', musicMuted ? '1' : '0'); } catch (e) {}
+    try { localStorage.setItem('kryptvault_muted', musicMuted ? '1' : '0'); } catch (e) {}
     if (musicMuted) stopMusic();
     else if (game.gameState === 'playing' || game.gameState === 'waveintro' ||
              game.gameState === 'levelup' || game.gameState === 'paused') startMusic();
@@ -713,7 +717,8 @@
   // ---------------------------------------------------------------------------
   // PERSISTENT RUN DATA (localStorage)
   // ---------------------------------------------------------------------------
-  var SAVE_KEY = 'cryptvault_data';
+  var SAVE_KEY = 'kryptvault_data';
+  var OLD_SAVE_KEY = 'cryptvault_data'; // pre-rename saves are migrated on load
 
   function defaultRunData() {
     return { bestWave: 1, bestKills: 0, bestLevel: 1, totalRuns: 0, totalKills: 0,
@@ -730,7 +735,7 @@
   function loadRunData() {
     var def = defaultRunData();
     try {
-      var raw = localStorage.getItem(SAVE_KEY);
+      var raw = localStorage.getItem(SAVE_KEY) || localStorage.getItem(OLD_SAVE_KEY);
       if (!raw) return def;
       var data = JSON.parse(raw);
       for (var k in def) if (!(k in data)) data[k] = def[k];
@@ -2674,9 +2679,9 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillStyle = '#b00';
-    ctx.fillText('CRYPTVAULT', W / 2 + 2, 22 + 2);
+    ctx.fillText('KRYPTVAULT', W / 2 + 2, 22 + 2);
     ctx.fillStyle = '#FFD700';
-    ctx.fillText('CRYPTVAULT', W / 2, 22);
+    ctx.fillText('KRYPTVAULT', W / 2, 22);
     text('TOP-DOWN ROGUELIKE', W / 2, 46, 8, '#ffffff', 'center');
 
     // ----- menu buttons (left column) -----

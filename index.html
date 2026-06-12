@@ -290,8 +290,27 @@
         pendingMode = 'normal';
         game.gameState = 'title';
       }
+    } else if (game.gameState === 'login') {
+      var pos = loginForm.buf.length;
+      if (/^Key[A-Z]$/.test(e.code)) {
+        var letter = e.code.slice(3);
+        if (pos < 3 || (pos >= 7 && pos < 15)) loginForm.buf += letter;
+      } else if (/^(Digit|Numpad)[0-9]$/.test(e.code)) {
+        var digit = e.code.slice(-1);
+        if ((pos >= 3 && pos < 7) || (pos >= 7 && pos < 15)) loginForm.buf += digit;
+      } else if (e.code === 'Backspace') {
+        loginForm.buf = loginForm.buf.slice(0, -1);
+        loginForm.state = 'idle';
+        e.preventDefault();
+      } else if (e.code === 'Escape') {
+        game.gameState = 'account';
+      }
+    } else if (game.gameState === 'account') {
+      if (e.code === 'Digit1') { nameDraft = ''; afterName = 'title'; game.gameState = 'nameentry'; }
+      else if (e.code === 'Digit2') { loginForm.buf = ''; loginForm.state = 'idle'; game.gameState = 'login'; }
+      else if (e.code === 'Escape') { game.gameState = 'title'; }
     } else if (game.gameState === 'title') {
-      if (e.code === 'KeyN') { nameDraft = ''; game.gameState = 'nameentry'; }
+      if (e.code === 'KeyN') { game.gameState = 'account'; }
       else if (e.code === 'KeyS') { game.gameState = 'shop'; }
       else if (e.code === 'KeyA') { game.gameState = 'achievements'; }
       else if (e.code === 'KeyL') {
@@ -310,7 +329,7 @@
     } else if (game.gameState === 'achievements') {
       if (e.code === 'Escape' || e.code === 'KeyA') game.gameState = 'title';
     }
-    if (e.code === 'KeyM' && game.gameState !== 'nameentry') toggleMute();
+    if (e.code === 'KeyM' && game.gameState !== 'nameentry' && game.gameState !== 'login') toggleMute();
     if (e.code === 'Enter') handleConfirm();
     if (e.code === 'KeyP' || e.code === 'Escape') {
       if (game.gameState === 'playing') game.gameState = 'paused';
@@ -416,8 +435,19 @@
         leaderboard.state = 'idle';
         maybeRefreshLeaderboard();
       }
-    } else if (game.gameState === 'gameover' || game.gameState === 'nameentry') {
+    } else if (game.gameState === 'gameover' || game.gameState === 'nameentry' ||
+               game.gameState === 'accountinfo' || game.gameState === 'login') {
       handleConfirm();
+    } else if (game.gameState === 'account') {
+      for (var ab = 0; ab < ACCOUNT_BTNS.length; ab++) {
+        var abtn = ACCOUNT_BTNS[ab];
+        if (p.x >= abtn.x && p.x <= abtn.x + abtn.w && p.y >= abtn.y && p.y <= abtn.y + abtn.h) {
+          if (abtn.id === 'newacct') { nameDraft = ''; afterName = 'title'; game.gameState = 'nameentry'; }
+          else { loginForm.buf = ''; loginForm.state = 'idle'; game.gameState = 'login'; }
+          return;
+        }
+      }
+      game.gameState = 'title';
     } else if (game.gameState === 'levelup') {
       tryPickCard(p.x, p.y);
     } else if (game.gameState === 'classselect') {
@@ -445,10 +475,17 @@
   }
 
   var nameDraft = '';
+  var afterName = 'play';     // where to go once the name/account step is done
   var pendingMode = 'normal'; // 'daily' when started via the daily challenge key
 
+  function finishNameStep() {
+    if (afterName === 'play') enterClassSelect();
+    else game.gameState = 'title';
+  }
+
   function handleConfirm() {
-    if (game.gameState === 'shop' || game.gameState === 'achievements') {
+    if (game.gameState === 'shop' || game.gameState === 'achievements' ||
+        game.gameState === 'account') {
       game.gameState = 'title';
       return;
     }
@@ -457,14 +494,24 @@
         enterClassSelect();
       } else {
         nameDraft = '';
+        afterName = 'play';
         game.gameState = 'nameentry';
       }
     } else if (game.gameState === 'nameentry') {
       if (nameDraft.length === 3) {
         runData.name = nameDraft;
+        // a fresh name means a fresh account
+        runData.playerDisc = '';
+        runData.playerSecret = '';
+        runData.playerId = '';
         saveRunData();
-        enterClassSelect();
+        game.gameState = 'accountinfo';
+        registerAccount(false);
       }
+    } else if (game.gameState === 'accountinfo') {
+      if (account.state === 'created' || account.state === 'error') finishNameStep();
+    } else if (game.gameState === 'login') {
+      if (loginForm.buf.length === 15 && loginForm.state !== 'checking') submitLogin();
     } else if (game.gameState === 'gameover') {
       game.gameState = 'title';
       maybeRefreshLeaderboard();
@@ -671,6 +718,7 @@
   function defaultRunData() {
     return { bestWave: 1, bestKills: 0, bestLevel: 1, totalRuns: 0, totalKills: 0,
              unlockedClasses: false, name: '', coins: 0,
+             playerDisc: '', playerSecret: '', playerId: '',
              shop: { vit: 0, mig: 0, swf: 0, wis: 0, frt: 0 },
              achievements: {} };
   }
@@ -700,7 +748,71 @@
   // GLOBAL LEADERBOARD (Supabase REST — anon key is public by design)
   // ---------------------------------------------------------------------------
   var SB_URL = 'https://gcsqmrdlmbpucatprbhx.supabase.co/rest/v1/scores';
+  var SB_RPC = 'https://gcsqmrdlmbpucatprbhx.supabase.co/rest/v1/rpc/';
   var SB_KEY = 'sb_publishable_NXbGLu9daR0M6y-dLThu9w_cdFizyEJ';
+
+  function sbRpc(fn, body, cb) {
+    fetch(SB_RPC + fn, {
+      method: 'POST',
+      headers: { apikey: SB_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); })
+      .then(cb)
+      .catch(function () { cb(undefined); });
+  }
+
+  // ---------------------------------------------------------------------------
+  // PLAYER ACCOUNTS — tag (MAR#1234) + secret vault key, portable across PCs
+  // ---------------------------------------------------------------------------
+  var account = { state: 'idle' };       // idle | creating | created | error
+  var loginForm = { buf: '', state: 'idle' }; // buf: 3 letters + 4 digits + 8 key chars
+
+  function playerTag() {
+    if (!runData.name) return '';
+    return runData.name + (runData.playerDisc ? '#' + runData.playerDisc : '');
+  }
+
+  function registerAccount(silentToast) {
+    account.state = 'creating';
+    sbRpc('register_player', { p_name: runData.name }, function (res) {
+      if (res && res.disc) {
+        runData.playerDisc = res.disc;
+        runData.playerSecret = res.secret;
+        runData.playerId = res.id;
+        saveRunData();
+        account.state = 'created';
+        if (silentToast) {
+          game.toasts.push({ txt: 'ACCOUNT CREATED: ' + playerTag(), t: 0 });
+        }
+      } else {
+        account.state = 'error';
+      }
+    });
+  }
+
+  function submitLogin() {
+    if (loginForm.buf.length !== 15) return;
+    loginForm.state = 'checking';
+    var nm = loginForm.buf.slice(0, 3);
+    var dc = loginForm.buf.slice(3, 7);
+    var ky = loginForm.buf.slice(7, 15);
+    sbRpc('login_player', { p_name: nm, p_disc: dc, p_secret: ky }, function (res) {
+      if (res && res.id) {
+        runData.name = nm;
+        runData.playerDisc = dc;
+        runData.playerSecret = ky;
+        runData.playerId = res.id;
+        saveRunData();
+        loginForm.state = 'idle';
+        loginForm.buf = '';
+        game.toasts.push({ txt: 'LOGGED IN AS ' + playerTag(), t: 0 });
+        game.gameState = 'title';
+      } else {
+        loginForm.state = res === null ? 'fail' : 'offline';
+        loginForm.buf = loginForm.buf.slice(0, 7); // keep tag, clear the key
+      }
+    });
+  }
 
   var leaderboard = { rows: [], state: 'idle', fetchedAt: 0, submitState: '', mode: 'normal' };
 
@@ -709,7 +821,7 @@
   function fetchLeaderboard() {
     if (leaderboard.state === 'loading') return;
     leaderboard.state = 'loading';
-    var q = SB_URL + '?select=name,wave,kills,cls&order=wave.desc,kills.desc&limit=10';
+    var q = SB_URL + '?select=name,disc,wave,kills,cls&order=wave.desc,kills.desc&limit=10';
     q += leaderboard.mode === 'daily'
        ? '&mode=eq.daily&day=eq.' + todayISO()
        : '&mode=eq.normal';
@@ -743,7 +855,9 @@
         kills: Math.min(99999, game.score),
         level: Math.min(99, game.level),
         cls: currentClass,
-        mode: game.mode
+        mode: game.mode,
+        disc: runData.playerDisc || null,
+        player_id: runData.playerId || null
       })
     }).then(function (r) {
       leaderboard.submitState = r.ok ? 'done' : 'error';
@@ -2510,7 +2624,7 @@
       { id: 'daily',  label: 'DAILY CHALLENGE',                               hint: 'D', x: 24, y: 116, w: 172, h: 22 },
       { id: 'shop',   label: 'THE VAULT — ' + Math.round(runData.coins) + 'c', hint: 'S', x: 24, y: 144, w: 172, h: 22 },
       { id: 'awards', label: 'AWARDS — ' + unlocked + '/' + ACHIEVEMENTS.length, hint: 'A', x: 24, y: 172, w: 172, h: 22 },
-      { id: 'name',   label: 'NAME: ' + (runData.name || '---'),              hint: 'N', x: 24, y: 200, w: 83, h: 20 },
+      { id: 'name',   label: runData.playerDisc ? playerTag() : 'NAME: ' + (runData.name || '---'), hint: 'N', x: 24, y: 200, w: 83, h: 20 },
       { id: 'mute',   label: musicMuted ? 'SND: OFF' : 'SND: ON',             hint: 'M', x: 113, y: 200, w: 83, h: 20 }
     ];
   }
@@ -2521,14 +2635,13 @@
     } else if (id === 'daily') {
       pendingMode = 'daily';
       if (runData.name && runData.name.length === 3) enterClassSelect();
-      else { nameDraft = ''; game.gameState = 'nameentry'; }
+      else { nameDraft = ''; afterName = 'play'; game.gameState = 'nameentry'; }
     } else if (id === 'shop') {
       game.gameState = 'shop';
     } else if (id === 'awards') {
       game.gameState = 'achievements';
     } else if (id === 'name') {
-      nameDraft = '';
-      game.gameState = 'nameentry';
+      game.gameState = 'account';
     } else if (id === 'mute') {
       toggleMute();
     }
@@ -2606,11 +2719,13 @@
     } else {
       for (var r = 0; r < leaderboard.rows.length; r++) {
         var row = leaderboard.rows[r];
-        var me = row.name === runData.name;
+        var me = row.name === runData.name &&
+                 (!runData.playerDisc || !row.disc || row.disc === runData.playerDisc);
+        var tag = row.name + (row.disc ? '#' + row.disc : '');
         var rowY = ly + r * 11;
         text(pad(r + 1, 2), LB_PANEL.x + 8, rowY, 6, me ? '#FFD700' : '#555566');
-        text(row.name, LB_PANEL.x + 28, rowY, 6, me ? '#FFD700' : classDef(row.cls).color);
-        text('W' + pad(row.wave, 2), LB_PANEL.x + 62, rowY, 6, me ? '#FFD700' : '#ffffff');
+        text(tag, LB_PANEL.x + 26, rowY, 6, me ? '#FFD700' : classDef(row.cls).color);
+        text('W' + pad(row.wave, 2), LB_PANEL.x + 134, rowY, 6, me ? '#FFD700' : '#ffffff');
         text(pad(row.kills, 4) + ' KILLS', LB_PANEL.x + LB_PANEL.w - 8, rowY, 6, me ? '#FFD700' : '#999999', 'right');
       }
     }
@@ -2620,6 +2735,112 @@
            W / 2, 248, 6, '#00e5ff', 'center');
     }
     text('WASD MOVE — AUTO-FIRE — P PAUSE', W / 2, 259, 6, '#555555', 'center');
+  }
+
+  // account hub: shows tag + vault key, switch/new account options
+  var ACCOUNT_BTNS = [
+    { id: 'newacct', label: '1. NEW NAME / ACCOUNT', x: 140, y: 168, w: 200, h: 20 },
+    { id: 'loginpc', label: '2. LOGIN WITH VAULT KEY', x: 140, y: 194, w: 200, h: 20 }
+  ];
+
+  function renderAccount() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    drawAnimatedScanlines(0.05);
+
+    text('YOUR ACCOUNT', W / 2, 24, 10, '#FFD700', 'center');
+
+    if (runData.playerDisc) {
+      text('PLAYING AS', W / 2, 56, 6, '#888888', 'center');
+      text(playerTag(), W / 2, 70, 16, '#00e5ff', 'center');
+      text('VAULT KEY', W / 2, 102, 6, '#888888', 'center');
+      text(runData.playerSecret, W / 2, 114, 10, '#FFD700', 'center');
+      text('USE TAG + KEY TO LOG IN ON ANY PC', W / 2, 136, 6, '#777777', 'center');
+    } else if (runData.name) {
+      text('LOCAL NAME: ' + runData.name + ' (NO ONLINE ACCOUNT)', W / 2, 70, 6, '#bbbbbb', 'center');
+      text('AN ACCOUNT IS CREATED AUTOMATICALLY WHEN ONLINE', W / 2, 86, 6, '#777777', 'center');
+    } else {
+      text('NO NAME SET YET', W / 2, 70, 8, '#bbbbbb', 'center');
+    }
+
+    for (var i = 0; i < ACCOUNT_BTNS.length; i++) {
+      var b = ACCOUNT_BTNS[i];
+      var hover = mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h;
+      ctx.fillStyle = hover ? '#FFD700' : '#444466';
+      ctx.fillRect(b.x - 1, b.y - 1, b.w + 2, b.h + 2);
+      ctx.fillStyle = '#0d0d1a';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      text(b.label, b.x + b.w / 2, b.y + 7, 6, hover ? '#ffffff' : '#cccccc', 'center');
+    }
+
+    text('ESC / ENTER TO RETURN', W / 2, 240, 6, '#888888', 'center');
+  }
+
+  function renderLogin() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    drawAnimatedScanlines(0.05);
+
+    text('LOGIN', W / 2, 22, 10, '#FFD700', 'center');
+    text('ENTER YOUR TAG AND VAULT KEY', W / 2, 42, 6, '#888888', 'center');
+
+    var buf = loginForm.buf;
+    // name (3) # disc (4)
+    var groups = [
+      { label: 'NAME', start: 0, len: 3, x: 96 },
+      { label: 'TAG #', start: 3, len: 4, x: 216 },
+      { label: 'VAULT KEY', start: 7, len: 8, x: 96, y2: true }
+    ];
+    for (var g = 0; g < groups.length; g++) {
+      var gr = groups[g];
+      var by = gr.y2 ? 150 : 78;
+      text(gr.label, gr.x, by - 12, 6, '#888888');
+      for (var i = 0; i < gr.len; i++) {
+        var bx = gr.x + i * 26;
+        var idx = gr.start + i;
+        var active = idx === buf.length;
+        ctx.fillStyle = active && game.blinkOn ? '#FFD700' : '#444466';
+        ctx.fillRect(bx - 1, by - 1, 22 + 2, 26 + 2);
+        ctx.fillStyle = '#0d0d1a';
+        ctx.fillRect(bx, by, 22, 26);
+        if (buf[idx]) text(buf[idx], bx + 11, by + 7, 10, '#ffffff', 'center');
+      }
+    }
+
+    text('A-Z FOR NAME/KEY — 0-9 FOR TAG/KEY — BACKSPACE ERASES', W / 2, 196, 6, '#666666', 'center');
+    if (loginForm.state === 'checking') {
+      text('CHECKING...', W / 2, 216, 8, '#FFD700', 'center');
+    } else if (loginForm.state === 'fail') {
+      text('NOT FOUND — CHECK TAG AND KEY', W / 2, 216, 8, '#ff5555', 'center');
+    } else if (loginForm.state === 'offline') {
+      text('OFFLINE — TRY AGAIN LATER', W / 2, 216, 8, '#ff5555', 'center');
+    } else if (buf.length === 15 && game.blinkOn) {
+      text('PRESS ENTER TO LOGIN', W / 2, 216, 8, '#33cc66', 'center');
+    }
+    text('ESC TO GO BACK', W / 2, 244, 6, '#888888', 'center');
+  }
+
+  function renderAccountInfo() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    drawAnimatedScanlines(0.05);
+
+    if (account.state === 'creating') {
+      text('CREATING ACCOUNT...', W / 2, 120, 10, '#FFD700', 'center');
+    } else if (account.state === 'created') {
+      text('ACCOUNT CREATED', W / 2, 40, 10, '#33cc66', 'center');
+      text(playerTag(), W / 2, 70, 16, '#00e5ff', 'center');
+      text('YOUR VAULT KEY', W / 2, 110, 6, '#888888', 'center');
+      text(runData.playerSecret, W / 2, 124, 12, '#FFD700', 'center');
+      text('WRITE IT DOWN — IT LOGS YOU IN ON ANY PC', W / 2, 152, 6, '#ff9f1c', 'center');
+      text('(ALSO SAVED HERE — SEE THE NAME MENU)', W / 2, 166, 6, '#666666', 'center');
+      if (game.blinkOn) text('PRESS ENTER OR CLICK TO CONTINUE', W / 2, 206, 8, '#ffffff', 'center');
+    } else {
+      text('COULD NOT CREATE ACCOUNT', W / 2, 90, 10, '#ff5555', 'center');
+      text('PLAYING WITH LOCAL NAME ' + runData.name, W / 2, 120, 6, '#bbbbbb', 'center');
+      text('AN ACCOUNT WILL BE CREATED WHEN ONLINE', W / 2, 134, 6, '#777777', 'center');
+      if (game.blinkOn) text('PRESS ENTER OR CLICK TO CONTINUE', W / 2, 180, 8, '#ffffff', 'center');
+    }
   }
 
   function renderNameEntry() {
@@ -2997,6 +3218,15 @@
     } else if (game.gameState === 'nameentry') {
       renderNameEntry();
       drawScanlines();
+    } else if (game.gameState === 'account') {
+      renderAccount();
+      drawScanlines();
+    } else if (game.gameState === 'login') {
+      renderLogin();
+      drawScanlines();
+    } else if (game.gameState === 'accountinfo') {
+      renderAccountInfo();
+      drawScanlines();
     } else if (game.gameState === 'classselect') {
       renderClassSelect();
       drawScanlines();
@@ -3045,6 +3275,10 @@
   // ---------------------------------------------------------------------------
   fetchLeaderboard();
   initMenuBackdrop();
+  // migrate pre-account players: claim a tag for the locally saved name
+  if (runData.name && runData.name.length === 3 && !runData.playerDisc) {
+    registerAccount(true);
+  }
 
   var lastTime = performance.now();
   function loop(ts) {

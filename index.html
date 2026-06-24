@@ -1209,9 +1209,11 @@
 
   function spawnEnemyAt(type, x, y) {
     var data = ENEMY_DATA[type];
+    // early-game ease: 5% softer at wave 1, fading to full by wave 6
+    var ease = 1 - Math.max(0, 6 - game.wave) * 0.01;
     // difficulty scaling: +30% HP per wave (plus curses), faster, harder hits
-    var hp = Math.round(data.hp * (1 + (game.wave - 1) * 0.3) * game.curseHpMult);
-    var speed = (40 + game.wave * 6) * game.curseSpeedMult;
+    var hp = Math.round(data.hp * (1 + (game.wave - 1) * 0.3) * game.curseHpMult * ease);
+    var speed = (40 + game.wave * 6) * game.curseSpeedMult * ease;
     var size = 14;
     if (type === 'cultist') speed *= 0.8;
     if (type === 'wraith') { speed *= 1.35; size = 12; }

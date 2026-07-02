@@ -563,11 +563,17 @@
     { id: 'shotgun',   name: 'SHOTGUN',    desc: '5-shot 60deg blast',     con: 'FIRE 0.1s SLOWER', detail: 'STACKS: +2 PELLETS',    color: '#ff9f1c' },
     { id: 'homing',    name: 'HOMING SHOT',desc: 'Shots seek foes',        con: 'SHOTS 15% SLOWER', detail: 'STACKS: STRONGER SEEK', color: '#2ec4b6' },
     { id: 'shield',    name: 'ORBIT SHIELD',desc:'3 orbs circle you',      con: '-8 MOVE SPEED',   detail: 'STACKS: +1 ORB',         color: '#00e5ff' },
+    { id: 'frost',     name: 'FROST SHOTS', desc: 'Hits slow foes 30%',    con: '-10% DAMAGE',     detail: 'STACKS: STRONGER SLOW',  color: '#8fd8ff' },
+    { id: 'ricochet',  name: 'RICOCHET',    desc: 'Shots bounce to a foe', con: '-10% DAMAGE',     detail: 'STACKS: +1 BOUNCE',      color: '#ffb347' },
+    { id: 'regen',     name: 'REGEN',       desc: '+1 HP per second',      con: '-10% DAMAGE',     detail: 'STACKS',                 color: '#7bed9f' },
+    { id: 'static',    name: 'STATIC BURST',desc: 'Zap 3 foes every 6s',   con: 'FIRE 0.05s SLOWER', detail: 'STACKS: +1 TARGET',    color: '#f5f76e' },
     // cursed upgrades: a strong boost with a permanent downside
     { id: 'greed',       name: 'GREED',        desc: '+100% coins',   con: 'FOES +30% HP',      detail: 'PAIRS WITH FORTUNE PERK', color: '#FFD700', cursed: true },
     { id: 'darkpact',    name: 'DARK PACT',    desc: '+1 projectile', con: 'CULTISTS HUNT YOU', detail: 'STACKS - MAX 6 SHOTS',    color: '#9b59b6', cursed: true },
     { id: 'bloodrage',   name: 'BLOOD RAGE',   desc: '+25 damage',    con: 'FOES +25% SPEED',   detail: 'STACKS',                  color: '#e74c3c', cursed: true },
-    { id: 'glasscannon', name: 'GLASS CANNON', desc: '+60% damage',   con: '-30 MAX HP',        detail: 'STACKS',                  color: '#ecf0f1', cursed: true }
+    { id: 'glasscannon', name: 'GLASS CANNON', desc: '+60% damage',   con: '-30 MAX HP',        detail: 'STACKS',                  color: '#ecf0f1', cursed: true },
+    { id: 'hastepact',   name: 'HASTE PACT',   desc: 'Move & fire 15% faster', con: 'FOES SPAWN 15% FASTER', detail: 'STACKS', color: '#ff8c00', cursed: true },
+    { id: 'bloodaltar',  name: 'BLOOD ALTAR',  desc: '+40% damage',   con: 'HEALING HALVED',    detail: 'STACKS',                  color: '#8b0000', cursed: true }
   ];
 
   // ---------------------------------------------------------------------------
@@ -622,7 +628,9 @@
   // Evolutions: rare combo cards offered once both base upgrades are owned.
   var EVOLUTIONS = [
     { id: 'seekerswarm', name: 'SEEKER SWARM', desc: '+4 pellets, pellets hit harder', con: 'SHOTS 10% SLOWER', detail: 'SHOTGUN + HOMING', color: '#ff2dd0', evolution: true, needs: ['shotgun', 'homing'] },
-    { id: 'bladeorbit',  name: 'BLADE ORBIT',  desc: 'Orbs deal 40 dmg, spin faster',  con: '-5 MOVE SPEED',   detail: 'SHIELD + DMG BOOST', color: '#ff4444', evolution: true, needs: ['shield', 'damage'] }
+    { id: 'bladeorbit',  name: 'BLADE ORBIT',  desc: 'Orbs deal 40 dmg, spin faster',  con: '-5 MOVE SPEED',   detail: 'SHIELD + DMG BOOST', color: '#ff4444', evolution: true, needs: ['shield', 'damage'] },
+    { id: 'railgun',     name: 'RAILGUN',      desc: 'Infinite pierce, +25 dmg', con: 'FIRE 0.3s SLOWER', detail: 'PIERCE + DMG BOOST', color: '#00ffcc', evolution: true, needs: ['pierce', 'damage'] },
+    { id: 'bulletstorm', name: 'BULLET STORM', desc: '+1 shot past the cap, fire faster', con: '-10% DAMAGE',  detail: 'MULTI-SHOT + ATK SPD', color: '#ff6bff', evolution: true, needs: ['multishot', 'atkspeed'] }
   ];
 
   // ---------------------------------------------------------------------------
@@ -696,7 +704,39 @@
     bladeorbit: { pal: { R: '#ff4444', W: '#ffffff' }, rows: [
       '.....RR.....', '.....RR.....', '.....RR.....', '.....RR.....',
       'RRRR.WW.RRRR', 'RRRR.WW.RRRR', '.....WW.....', '.....RR.....',
-      '.....RR.....', '.....RR.....', '.....RR.....', '............'] }
+      '.....RR.....', '.....RR.....', '.....RR.....', '............'] },
+    frost: { pal: { C: '#8fd8ff', W: '#ffffff' }, rows: [
+      '.....CC.....', '.C...CC...C.', '..C..CC..C..', '...C.CC.C...',
+      '....CCCC....', 'CCCCCWWCCCCC', 'CCCCCWWCCCCC', '....CCCC....',
+      '...C.CC.C...', '..C..CC..C..', '.C...CC...C.', '.....CC.....'] },
+    ricochet: { pal: { O: '#ffb347', W: '#ffffff' }, rows: [
+      'OO..........', '.OO.........', '..OO.......W', '...OO.....WW',
+      '....OO...OWW', '.....OO..O..', '......OOO...', '.......O....',
+      '............', '............', '............', '............'] },
+    regen: { pal: { R: '#ff2d2d', G: '#7bed9f' }, rows: [
+      '..RR....RR..', '.RRRR..RRRR.', 'RRRRRRRRRRRR', 'RRRRRRRRRRRR',
+      '.RRRRRRRRRR.', '..RRRRRRRR..', '...RRRRRR...', '....RRRR....',
+      '.....RR..G..', '........GGG.', '.........G..', '............'] },
+    static: { pal: { Y: '#f5f76e', W: '#ffffff' }, rows: [
+      'W...........', '....YYYY....', '...YYYY.....', '..YYYY....W.',
+      '.YYYYYYYY...', '....YYYY....', '...YYYY.....', 'W..YYY......',
+      '..YYY.......', '.YY.........', '.Y......W...', '............'] },
+    hastepact: { pal: { O: '#ff8c00' }, rows: [
+      'O....O......', 'OO...OO.....', '.OO...OO....', '..OO...OO...',
+      '...OO...OO..', '....OO...OO.', '....OO...OO.', '...OO...OO..',
+      '..OO...OO...', '.OO...OO....', 'OO...OO.....', 'O....O......'] },
+    bloodaltar: { pal: { A: '#8b95a5', R: '#ff2d2d' }, rows: [
+      '.....RR.....', '....RRRR....', '....RRRR....', '.....RR.....',
+      '............', '..AAAAAAAA..', '..AAAAAAAA..', '....AAAA....',
+      '....AAAA....', '...AAAAAA...', '.AAAAAAAAAA.', 'AAAAAAAAAAAA'] },
+    railgun: { pal: { G: '#556677', T: '#00ffcc', W: '#ffffff' }, rows: [
+      '............', '.GG.........', '.GGG........', '.GGGTTTTTTTT',
+      '.GGGWWWWWWWW', '.GGGTTTTTTTT', '.GGG........', '.GG.........',
+      '............', '............', '............', '............'] },
+    bulletstorm: { pal: { M: '#ff6bff', W: '#ffffff' }, rows: [
+      '..MW........', '......MW....', 'MW.......MW.', '....MW......',
+      '.........MW.', '.MW....MW...', '.....MW.....', 'MW........MW',
+      '...MW.......', '.......MW...', '..MW.....MW.', '.....MW.....'] }
   };
 
   function drawPixelIcon(art, x, y, scale) {
@@ -1014,6 +1054,9 @@
     pickups: [],          // dropped potions/bombs/frenzy
     hitStop: 0,           // brief world freeze on kills (game feel)
     toasts: [],           // achievement popups
+    zaps: [],             // static-burst lightning visuals
+    spawnHaste: 1,        // haste pact speeds up spawning
+    freezeTimer: 0,       // chrono pickup freezes enemies
     coinsEarned: 0,       // coins banked at the end of the run
     tookDamage: false,    // for the UNTOUCHABLE achievement
     mode: 'normal',       // 'normal' or 'daily'
@@ -1053,6 +1096,15 @@
       shield: 0,         // orbiting shield level
       seekerSwarm: 0,    // evolution flags
       bladeOrbit: 0,
+      railgun: 0,
+      bulletstorm: 0,
+      frost: 0,          // slow-on-hit level
+      ricochet: 0,       // bounce count
+      regen: 0,          // HP per second
+      staticLvl: 0,      // periodic zap level
+      staticTimer: 3,
+      healMult: 1,       // blood altar halves this
+      barrier: 0,        // pickup: hits absorbed
       orbs: [],          // orbiting shield orbs
       orbRadius: 40,
       orbSpeed: 0,       // radians/sec
@@ -1095,6 +1147,9 @@
     game.floatTexts = [];
     game.pickups = [];
     game.hitStop = 0;
+    game.zaps = [];
+    game.spawnHaste = 1;
+    game.freezeTimer = 0;
     game.coinsEarned = 0;
     game.tookDamage = false;
     game.mode = pendingMode;
@@ -1155,7 +1210,7 @@
       game.gameState = 'playing';
       // breather: a small heal for surviving the wave
       var hpl = game.player;
-      var heal = Math.min(15, hpl.maxHp - hpl.hp);
+      var heal = Math.min(Math.round(15 * hpl.healMult), hpl.maxHp - hpl.hp);
       if (heal > 0) {
         hpl.hp += heal;
         spawnFloatText(hpl.x, hpl.y, '+' + Math.round(heal), '#33ff66');
@@ -1364,7 +1419,8 @@
       vx: Math.cos(ang) * p.shotSpeed,
       vy: Math.sin(ang) * p.shotSpeed,
       damage: dmg,
-      pierce: p.pierce,
+      pierce: p.railgun ? 99 : p.pierce,
+      bounces: p.ricochet,
       // homing strength: 0.08 base, +0.04 per extra pick; mage has an
       // innate 0.06 without the upgrade.
       homing: p.homing > 0 ? (0.08 + (p.homing - 1) * 0.04) : (p.homingBase || 0),
@@ -1461,7 +1517,7 @@
                         p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;
       case 'damage':    p.damage += 15;
                         p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
-      case 'health':    p.maxHp += 30; p.hp = Math.min(p.maxHp, p.hp + 30);
+      case 'health':    p.maxHp += 30; p.hp = Math.min(p.maxHp, p.hp + Math.round(30 * p.healMult));
                         p.speed = Math.max(40, p.speed - 5); break;
       case 'movespeed': p.speed += 20;
                         p.maxHp = Math.max(30, p.maxHp - 10);
@@ -1486,11 +1542,30 @@
       case 'glasscannon': p.damage = Math.round(p.damage * 1.6);
                           p.maxHp = Math.max(30, p.maxHp - 30);
                           p.hp = Math.min(p.hp, p.maxHp); break;
+      case 'frost':     p.frost += 1;
+                        p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
+      case 'ricochet':  p.ricochet += 1;
+                        p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
+      case 'regen':     p.regen += 1;
+                        p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
+      case 'static':    p.staticLvl += 1;
+                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
+      case 'hastepact': p.speed = Math.round(p.speed * 1.15);
+                        p.attackCooldown = Math.max(0.2, p.attackCooldown * 0.87);
+                        game.spawnHaste *= 1.15; break;
+      case 'bloodaltar': p.damage = Math.round(p.damage * 1.4);
+                        p.healMult *= 0.5; break;
       // evolutions
       case 'seekerswarm': p.seekerSwarm = 1;
                           p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;
       case 'bladeorbit':  p.bladeOrbit = 1; rebuildOrbs();
                           p.speed = Math.max(40, p.speed - 5); break;
+      case 'railgun':     p.railgun = 1; p.damage += 25;
+                          p.attackCooldown = Math.min(1.9, p.attackCooldown + 0.3); break;
+      case 'bulletstorm': p.bulletstorm = 1;
+                          p.projectiles = Math.min(7, p.projectiles + 1);
+                          p.attackCooldown = Math.max(0.15, p.attackCooldown - 0.1);
+                          p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
     }
     if (u.evolution) unlockAch('evolved');
     if (u.cursed) {
@@ -1595,9 +1670,46 @@
       p.attackTimer = p.attackCooldown * (p.frenzyTimer > 0 ? 0.5 : 1);
     }
 
+    // ----- regen upgrade -----
+    if (p.regen > 0 && p.hp < p.maxHp) {
+      p.hp = Math.min(p.maxHp, p.hp + p.regen * p.healMult * dt);
+    }
+
+    // ----- static burst: periodic zap of the nearest foes -----
+    if (p.staticLvl > 0) {
+      p.staticTimer -= dt;
+      if (p.staticTimer <= 0) {
+        p.staticTimer = 6;
+        var zapTargets = game.enemies.slice()
+          .map(function (en2) { var zdx = en2.x - p.x, zdy = en2.y - p.y; return { e: en2, d: zdx * zdx + zdy * zdy }; })
+          .filter(function (t2) { return t2.d < 180 * 180; })
+          .sort(function (a2, b2) { return a2.d - b2.d; })
+          .slice(0, 2 + p.staticLvl);
+        for (var zt = 0; zt < zapTargets.length; zt++) {
+          var ze = zapTargets[zt].e;
+          ze.hp -= 25;
+          ze.hitFlash = 0.1;
+          game.dmgDealt += 25;
+          spawnFloatText(ze.x, ze.y, '25', '#f5f76e');
+          game.zaps.push({ x1: p.x, y1: p.y, x2: ze.x, y2: ze.y, t: 0.15 });
+          if (ze.hp <= 0) {
+            var zi = game.enemies.indexOf(ze);
+            if (zi !== -1) {
+              if (ze.isBoss) killBoss(zi, ze); else killEnemy(zi, ze);
+            }
+          }
+        }
+        if (zapTargets.length) playPickup();
+      }
+    }
+    for (var zz = game.zaps.length - 1; zz >= 0; zz--) {
+      game.zaps[zz].t -= dt;
+      if (game.zaps[zz].t <= 0) game.zaps.splice(zz, 1);
+    }
+
     // ----- enemy spawning (continuous; slower trickle during boss waves) -----
     // gentle for the first few waves, then ramps to the same late-game pressure
-    var spawnInterval = Math.max(0.25, 1.5 - game.wave * 0.1);
+    var spawnInterval = Math.max(0.25, 1.5 - game.wave * 0.1) / game.spawnHaste;
     if (game.bossWave) spawnInterval *= 1.8;
     game.spawnTimer -= dt;
     if (game.spawnTimer <= 0) {
@@ -1646,10 +1758,13 @@
       }
     }
 
-    // ----- update enemies -----
+    // ----- update enemies (chrono pickup freezes them solid) -----
+    if (game.freezeTimer > 0) game.freezeTimer -= dt;
     for (var j = game.enemies.length - 1; j >= 0; j--) {
       var e = game.enemies[j];
       if (e.hitFlash > 0) e.hitFlash -= dt;
+      if (game.freezeTimer > 0) continue; // frozen: no moving, fusing, or shooting
+      if (e.slowT > 0) e.slowT -= dt;
       // desired velocity: chase the player, plus decaying knockback.
       // cultists keep their distance and shoot instead of melee-rushing.
       var edx = p.x - e.x, edy = p.y - e.y;
@@ -1719,8 +1834,9 @@
         }
       }
 
-      var mvx = (edx / ed) * chase + e.kx;
-      var mvy = (edy / ed) * chase + e.ky;
+      var slowF = e.slowT > 0 ? (1 - (e.slowAmt || 0.3)) : 1; // frost shots
+      var mvx = (edx / ed) * chase * slowF + e.kx;
+      var mvy = (edy / ed) * chase * slowF + e.ky;
       e.kx *= 0.85; e.ky *= 0.85;
 
       var ghost = (e.type === 'wraith'); // wraiths drift straight through walls
@@ -1779,24 +1895,14 @@
           e.kx = kdx * 120;
           e.ky = kdy * 120;
         }
-        if (p.invuln <= 0) {
-          p.hp -= e.contact;
-          p.invuln = 0.5;
-          game.tookDamage = true;
-          game.damageFlash = 0.1;
-          game.shakeTimer = 0.3;
-          playHit();
-          if (p.hp <= 0) {
-            p.hp = 0;
-            endRun();
-          }
-        }
+        damagePlayer(e.contact, true);
       }
     }
 
-    // ----- cultist projectiles -----
+    // ----- cultist projectiles (also frozen by chrono) -----
     for (var es = game.enemyShots.length - 1; es >= 0; es--) {
       var sh = game.enemyShots[es];
+      if (game.freezeTimer > 0) break;
       sh.x += sh.vx * dt;
       sh.y += sh.vy * dt;
       if (boxHitsWall(sh.x, sh.y, 5, 5)) {
@@ -1805,14 +1911,7 @@
         continue;
       }
       if (Math.abs(sh.x - p.x) < (p.w / 2 + 3) && Math.abs(sh.y - p.y) < (p.h / 2 + 3)) {
-        if (p.invuln <= 0) {
-          p.hp -= 10;
-          p.invuln = 0.4;
-          game.tookDamage = true;
-          game.damageFlash = 0.1;
-          playHit();
-          if (p.hp <= 0) { p.hp = 0; endRun(); }
-        }
+        damagePlayer(10, false);
         game.enemyShots.splice(es, 1); // the bolt is spent either way
         continue;
       }
@@ -1860,12 +1959,38 @@
           game.dmgDealt += proj.damage;
           spawnFloatText(en.x, en.y, '' + Math.round(proj.damage), '#ffe600');
           en.hitFlash = 0.08;
+          // frost shots chill whatever they hit
+          if (p.frost > 0) {
+            en.slowT = 1.0;
+            en.slowAmt = Math.min(0.6, 0.3 + (p.frost - 1) * 0.15);
+          }
           proj.hitSet.push(en);
           if (en.hp <= 0) {
             if (en.isBoss) killBoss(ei, en); else killEnemy(ei, en);
           }
           if (proj.pierce > 0) {
             proj.pierce--;
+          } else if (proj.bounces > 0) {
+            // ricochet: retarget the nearest unhit enemy within 120px
+            var bTarget = null, bDist = 120 * 120;
+            for (var bi2 = 0; bi2 < game.enemies.length; bi2++) {
+              var cand = game.enemies[bi2];
+              if (proj.hitSet.indexOf(cand) !== -1) continue;
+              var bdx = cand.x - proj.x, bdy = cand.y - proj.y;
+              var bd2 = bdx * bdx + bdy * bdy;
+              if (bd2 < bDist) { bDist = bd2; bTarget = cand; }
+            }
+            if (bTarget) {
+              proj.bounces--;
+              var bAng = Math.atan2(bTarget.y - proj.y, bTarget.x - proj.x);
+              var bSpd = Math.sqrt(proj.vx * proj.vx + proj.vy * proj.vy);
+              proj.vx = Math.cos(bAng) * bSpd;
+              proj.vy = Math.sin(bAng) * bSpd;
+            } else {
+              game.projectiles.splice(pi, 1);
+              removed = true;
+              break;
+            }
           } else {
             game.projectiles.splice(pi, 1);
             removed = true;
@@ -1927,7 +2052,7 @@
     var p = game.player;
     gainXP((en.xpVal || en.maxHp / 5) * p.xpMult);
     if (p.vampire > 0) {
-      p.hp = Math.min(p.maxHp, p.hp + p.vampire);
+      p.hp = Math.min(p.maxHp, p.hp + p.vampire * p.healMult);
     }
     game.score++;
     game.waveKills++;
@@ -1950,13 +2075,8 @@
     game.shakeTimer = 0.25;
     var p = game.player;
     var dx = p.x - e.x, dy = p.y - e.y;
-    if (dx * dx + dy * dy < 50 * 50 && p.invuln <= 0) {
-      p.hp -= 25;
-      p.invuln = 0.5;
-      game.tookDamage = true;
-      game.damageFlash = 0.1;
-      playHit();
-      if (p.hp <= 0) { p.hp = 0; endRun(); }
+    if (dx * dx + dy * dy < 50 * 50) {
+      damagePlayer(25, false);
     }
     for (var i = game.enemies.length - 1; i >= 0; i--) {
       var o = game.enemies[i];
@@ -1983,6 +2103,8 @@
     if (roll < 0.04) type = 'potion';
     else if (roll < 0.055) type = 'bomb';
     else if (roll < 0.07) type = 'frenzy';
+    else if (roll < 0.085) type = 'barrier';
+    else if (roll < 0.095) type = 'chrono';
     if (!type) return;
     game.pickups.push({ x: x, y: y, type: type, t: 8 });
   }
@@ -1991,9 +2113,15 @@
     var p = game.player;
     playPickup();
     if (pk.type === 'potion') {
-      var heal = Math.min(25, p.maxHp - p.hp);
+      var heal = Math.min(Math.round(25 * p.healMult), p.maxHp - p.hp);
       p.hp += heal;
       spawnFloatText(p.x, p.y, '+' + Math.round(heal), '#33ff66');
+    } else if (pk.type === 'barrier') {
+      p.barrier = 3;
+      spawnFloatText(p.x, p.y, 'BARRIER!', '#00e5ff');
+    } else if (pk.type === 'chrono') {
+      game.freezeTimer = 2.5;
+      spawnFloatText(p.x, p.y, 'TIME FREEZE!', '#8fd8ff');
     } else if (pk.type === 'bomb') {
       game.whiteFlash = 3;
       game.shakeTimer = 0.4;
@@ -2029,19 +2157,37 @@
     gainXP(xpForNext() - game.xp + 1); // guarantees exactly one level-up
   }
 
+  // Single entry point for anything that hurts the player: respects i-frames
+  // and barrier charges, handles death.
+  function damagePlayer(amount, shake) {
+    var p = game.player;
+    if (p.invuln > 0) return;
+    if (p.barrier > 0) {
+      p.barrier--;
+      p.invuln = 0.4;
+      spawnFloatText(p.x, p.y - 10, 'BLOCKED', '#00e5ff');
+      playPickup();
+      return;
+    }
+    p.hp -= amount;
+    p.invuln = 0.5;
+    game.tookDamage = true;
+    game.damageFlash = 0.1;
+    if (shake) game.shakeTimer = 0.3;
+    playHit();
+    if (p.hp <= 0) {
+      p.hp = 0;
+      endRun();
+    }
+  }
+
   // An enemy survived 1.5s at a screen edge: detonate it.
   function triggerShockwave(x, y) {
     game.shockwaves.push({ x: x, y: y, t: 0 });
     var p = game.player;
     var dx = p.x - x, dy = p.y - y;
-    if (dx * dx + dy * dy < 120 * 120 && p.invuln <= 0) {
-      p.hp -= 20;
-      p.invuln = 0.5;
-      game.tookDamage = true;
-      game.damageFlash = 0.1;
-      game.shakeTimer = 0.3;
-      playHit();
-      if (p.hp <= 0) { p.hp = 0; endRun(); }
+    if (dx * dx + dy * dy < 120 * 120) {
+      damagePlayer(20, true);
     }
   }
 
@@ -2159,6 +2305,22 @@
         ctx.fillRect(x - 1, y - 7, 3, 6);        // lightning bolt
         ctx.fillRect(x - 3, y - 2, 5, 3);
         ctx.fillRect(x, y + 1, 3, 6);
+      } else if (pk.type === 'barrier') {
+        ctx.strokeStyle = '#00e5ff';             // shield bubble
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillRect(x - 2, y - 2, 4, 4);
+      } else if (pk.type === 'chrono') {
+        ctx.fillStyle = '#ffffff';               // clock face
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#223344';
+        ctx.fillRect(x, y - 4, 1, 4);            // hands
+        ctx.fillRect(x, y, 3, 1);
       }
     }
   }
@@ -2241,6 +2403,14 @@
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(p.x, p.y, 13, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // barrier bubble (one notch fades per charge)
+    if (p.barrier > 0) {
+      ctx.strokeStyle = 'rgba(0,229,255,' + (0.25 + 0.15 * p.barrier) + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 15, 0, Math.PI * 2);
       ctx.stroke();
     }
   }
@@ -2338,6 +2508,10 @@
     if (drew) {
       if (e.hitFlash > 0) {
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.fillRect(dx, dy, 16, 16);
+      }
+      if (e.slowT > 0 || game.freezeTimer > 0) {
+        ctx.fillStyle = 'rgba(140,215,255,0.35)'; // frost / chrono chill
         ctx.fillRect(dx, dy, 16, 16);
       }
     } else {
@@ -2452,6 +2626,18 @@
     drawOrbs();
     drawProjectiles();
     drawEdgeEffects();
+    // static-burst lightning: jagged 3-segment bolts
+    for (var zi2 = 0; zi2 < game.zaps.length; zi2++) {
+      var z = game.zaps[zi2];
+      ctx.strokeStyle = 'rgba(245,247,110,' + (z.t / 0.15) + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(z.x1, z.y1);
+      var zmx = (z.x1 + z.x2) / 2 + rand(-6, 6), zmy = (z.y1 + z.y2) / 2 + rand(-6, 6);
+      ctx.lineTo(zmx, zmy);
+      ctx.lineTo(z.x2, z.y2);
+      ctx.stroke();
+    }
     drawFloatTexts();
     ctx.restore();
 
@@ -2473,6 +2659,11 @@
     // damage flash overlay
     if (game.damageFlash > 0) {
       ctx.fillStyle = 'rgba(255,0,0,0.2)';
+      ctx.fillRect(0, 0, W, H);
+    }
+    // chrono freeze tint
+    if (game.freezeTimer > 0) {
+      ctx.fillStyle = 'rgba(120,200,255,0.10)';
       ctx.fillRect(0, 0, W, H);
     }
   }

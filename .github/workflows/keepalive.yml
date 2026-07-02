@@ -1,0 +1,18 @@
+name: keep-supabase-alive
+
+# Supabase free tier pauses projects after ~7 days without API traffic.
+# A daily leaderboard ping keeps the DB warm. The apikey below is the
+# public anon key (already shipped in index.html), not a secret.
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping leaderboard
+        run: |
+          curl -sf "https://gcsqmrdlmbpucatprbhx.supabase.co/rest/v1/scores?select=id&limit=1" \
+            -H "apikey: sb_publishable_NXbGLu9daR0M6y-dLThu9w_cdFizyEJ" > /dev/null

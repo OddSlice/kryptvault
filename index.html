@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.1';
+  var GAME_VERSION = '0.1a';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -328,10 +328,12 @@
         leaderboard.state = 'idle';
         maybeRefreshLeaderboard();
       } else if (e.code === 'KeyD') {
-        pendingMode = 'daily';
-        if (runData.name && runData.name.length === 3) enterClassSelect();
-        else { nameDraft = ''; game.gameState = 'nameentry'; }
+        startModeGate('daily');
       }
+    } else if (game.gameState === 'modeselect') {
+      if (e.code === 'Digit1') startModeGate('normal');
+      else if (e.code === 'Digit2') startModeGate('daily');
+      else if (e.code === 'Escape') game.gameState = 'title';
     } else if (game.gameState === 'shop') {
       var si = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4 };
       if (e.code in si) tryBuyShopItem(si[e.code]);
@@ -483,6 +485,18 @@
         }
       }
       if (!bought && p.y > 230) game.gameState = 'title';
+    } else if (game.gameState === 'modeselect') {
+      for (var mc = 0; mc < MODE_CARDS.length; mc++) {
+        var mcard = MODE_CARDS[mc];
+        if (p.x >= mcard.x && p.x <= mcard.x + mcard.w && p.y >= mcard.y && p.y <= mcard.y + mcard.h) {
+          startModeGate(mcard.id);
+          return;
+        }
+      }
+      if (p.x >= MODE_BACK.x && p.x <= MODE_BACK.x + MODE_BACK.w &&
+          p.y >= MODE_BACK.y && p.y <= MODE_BACK.y + MODE_BACK.h) {
+        game.gameState = 'title';
+      }
     } else if (game.gameState === 'achievements' || game.gameState === 'codex') {
       game.gameState = 'title';
     } else if (game.gameState === 'feedback') {
@@ -520,13 +534,9 @@
       return;
     }
     if (game.gameState === 'title') {
-      if (runData.name && runData.name.length === 3) {
-        enterClassSelect();
-      } else {
-        nameDraft = '';
-        afterName = 'play';
-        game.gameState = 'nameentry';
-      }
+      game.gameState = 'modeselect';
+    } else if (game.gameState === 'modeselect') {
+      startModeGate('normal'); // Enter = quick-start a standard run
     } else if (game.gameState === 'nameentry') {
       if (nameDraft.length === 3) {
         runData.name = nameDraft;
@@ -2854,23 +2864,24 @@
     var unlocked = 0;
     for (var i = 0; i < ACHIEVEMENTS.length; i++) if (runData.achievements[ACHIEVEMENTS[i].id]) unlocked++;
     return [
-      { id: 'play',   label: 'PLAY',                                          hint: 'ENTER', x: 24, y: 78,  w: 172, h: 26, big: true },
-      { id: 'daily',  label: 'DAILY CHALLENGE',                               hint: 'D', x: 24, y: 110, w: 172, h: 20 },
-      { id: 'shop',   label: 'THE VAULT — ' + Math.round(runData.coins) + 'c', hint: 'S', x: 24, y: 135, w: 172, h: 20 },
-      { id: 'awards', label: 'AWARDS — ' + unlocked + '/' + ACHIEVEMENTS.length, hint: 'A', x: 24, y: 160, w: 172, h: 20 },
-      { id: 'codex',  label: 'RECIPE CODEX',                                  hint: 'R', x: 24, y: 185, w: 172, h: 20 },
-      { id: 'name',   label: runData.playerDisc ? playerTag() : 'NAME: ' + (runData.name || '---'), hint: 'N', x: 24, y: 210, w: 83, h: 18 },
-      { id: 'mute',   label: musicMuted ? 'SND: OFF' : 'SND: ON',             hint: 'M', x: 113, y: 210, w: 83, h: 18 }
+      { id: 'play',   label: 'PLAY',                                          hint: 'ENTER', x: 24, y: 80,  w: 172, h: 28, big: true },
+      { id: 'shop',   label: 'THE VAULT: UPGRADES ' + Math.round(runData.coins) + 'c', hint: 'S', x: 24, y: 116, w: 172, h: 20 },
+      { id: 'awards', label: 'AWARDS — ' + unlocked + '/' + ACHIEVEMENTS.length, hint: 'A', x: 24, y: 142, w: 172, h: 20 },
+      { id: 'codex',  label: 'RECIPE CODEX',                                  hint: 'R', x: 24, y: 168, w: 172, h: 20 },
+      { id: 'name',   label: runData.playerDisc ? playerTag() : 'NAME: ' + (runData.name || '---'), hint: 'N', x: 24, y: 198, w: 83, h: 18 },
+      { id: 'mute',   label: musicMuted ? 'SND: OFF' : 'SND: ON',             hint: 'M', x: 113, y: 198, w: 83, h: 18 }
     ];
+  }
+
+  function startModeGate(mode) {
+    pendingMode = mode;
+    if (runData.name && runData.name.length === 3) enterClassSelect();
+    else { nameDraft = ''; afterName = 'play'; game.gameState = 'nameentry'; }
   }
 
   function titleButtonAction(id) {
     if (id === 'play') {
-      handleConfirm();
-    } else if (id === 'daily') {
-      pendingMode = 'daily';
-      if (runData.name && runData.name.length === 3) enterClassSelect();
-      else { nameDraft = ''; afterName = 'play'; game.gameState = 'nameentry'; }
+      game.gameState = 'modeselect';
     } else if (id === 'shop') {
       game.gameState = 'shop';
     } else if (id === 'awards') {
@@ -2991,7 +3002,7 @@
            W / 2, 248, 6, '#00e5ff', 'center');
     }
     text('WASD MOVE — AUTO-FIRE — P PAUSE', W / 2, 259, 6, '#555555', 'center');
-    text('V' + GAME_VERSION, 6, 258, 6, '#555566');
+    text('v' + GAME_VERSION, 6, 258, 6, '#555566');
   }
 
   // account hub: shows tag + vault key, switch/new account options
@@ -3399,6 +3410,62 @@
     text('CLICK OR PRESS 1-5 TO BUY — ESC / ENTER TO RETURN', W / 2, 240, 6, '#888888', 'center');
   }
 
+  // play flow: pick a run mode before class select
+  var MODE_CARDS = [
+    { id: 'normal', x: 48,  y: 62, w: 180, h: 142 },
+    { id: 'daily',  x: 252, y: 62, w: 180, h: 142 }
+  ];
+  var MODE_BACK = { x: 190, y: 226, w: 100, h: 20 };
+
+  function renderModeSelect() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    drawAnimatedScanlines(0.05);
+
+    text('CHOOSE YOUR RUN', W / 2, 26, 10, '#FFD700', 'center');
+
+    for (var i = 0; i < MODE_CARDS.length; i++) {
+      var c = MODE_CARDS[i];
+      var hover = mouse.x >= c.x && mouse.x <= c.x + c.w && mouse.y >= c.y && mouse.y <= c.y + c.h;
+      var accent = c.id === 'daily' ? '#ff2dd0' : '#FFD700';
+      if (hover) {
+        ctx.fillStyle = c.id === 'daily' ? 'rgba(255,45,208,0.35)' : 'rgba(255,215,0,0.35)';
+        ctx.fillRect(c.x - 4, c.y - 4, c.w + 8, c.h + 8);
+      }
+      ctx.fillStyle = accent;
+      ctx.fillRect(c.x - 2, c.y - 2, c.w + 4, c.h + 4);
+      ctx.fillStyle = '#101020';
+      ctx.fillRect(c.x, c.y, c.w, c.h);
+      text(String(i + 1), c.x + 8, c.y + 8, 6, '#666666');
+      if (c.id === 'normal') {
+        text('STANDARD', c.x + c.w / 2, c.y + 12, 8, accent, 'center');
+        text('THE ENDLESS CRYPT', c.x + c.w / 2, c.y + 36, 6, '#ffffff', 'center');
+        text('NEW RANDOM DUNGEON', c.x + c.w / 2, c.y + 58, 6, '#bbbbbb', 'center');
+        text('EVERY SINGLE RUN', c.x + c.w / 2, c.y + 70, 6, '#bbbbbb', 'center');
+        text('COMPETE ON THE', c.x + c.w / 2, c.y + 92, 6, '#888888', 'center');
+        text('ALL-TIME LEADERBOARD', c.x + c.w / 2, c.y + 104, 6, '#888888', 'center');
+      } else {
+        text('DAILY CHALLENGE', c.x + c.w / 2, c.y + 12, 8, accent, 'center');
+        text('ONE SHARED DUNGEON', c.x + c.w / 2, c.y + 36, 6, '#ffffff', 'center');
+        text('SAME LAYOUT FOR', c.x + c.w / 2, c.y + 58, 6, '#bbbbbb', 'center');
+        text('EVERYONE TODAY (UTC)', c.x + c.w / 2, c.y + 70, 6, '#bbbbbb', 'center');
+        text('ITS OWN DAILY', c.x + c.w / 2, c.y + 92, 6, '#888888', 'center');
+        text('LEADERBOARD', c.x + c.w / 2, c.y + 104, 6, '#888888', 'center');
+      }
+      text('CLICK TO PLAY', c.x + c.w / 2, c.y + 124, 6, hover ? '#ffffff' : '#555566', 'center');
+    }
+
+    var bHover = mouse.x >= MODE_BACK.x && mouse.x <= MODE_BACK.x + MODE_BACK.w &&
+                 mouse.y >= MODE_BACK.y && mouse.y <= MODE_BACK.y + MODE_BACK.h;
+    ctx.fillStyle = bHover ? '#FFD700' : '#444466';
+    ctx.fillRect(MODE_BACK.x - 1, MODE_BACK.y - 1, MODE_BACK.w + 2, MODE_BACK.h + 2);
+    ctx.fillStyle = '#0d0d1a';
+    ctx.fillRect(MODE_BACK.x, MODE_BACK.y, MODE_BACK.w, MODE_BACK.h);
+    text('BACK (ESC)', MODE_BACK.x + MODE_BACK.w / 2, MODE_BACK.y + 7, 6, bHover ? '#ffffff' : '#cccccc', 'center');
+
+    text('ENTER = QUICK-START STANDARD', W / 2, 256, 6, '#555566', 'center');
+  }
+
   function renderCodex() {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
@@ -3597,6 +3664,9 @@
       drawScanlines();
     } else if (game.gameState === 'codex') {
       renderCodex();
+      drawScanlines();
+    } else if (game.gameState === 'modeselect') {
+      renderModeSelect();
       drawScanlines();
     } else if (game.gameState === 'feedback') {
       renderFeedback();

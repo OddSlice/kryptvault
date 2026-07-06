@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.2d';
+  var GAME_VERSION = '0.3';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -189,6 +189,38 @@
       ctx.restore();
     } else {
       ctx.drawImage(spritesheet, tile.x, tile.y, 16, 16, dx, dy, dw, dh);
+    }
+    return true;
+  }
+
+  // Offscreen buffer for skin tinting: draw the tile, then 'source-atop' a
+  // colour so only the sprite's own pixels are recoloured (no box), then blit.
+  var _skinBuf = document.createElement('canvas');
+  _skinBuf.width = 16; _skinBuf.height = 16;
+  var _skinCtx = _skinBuf.getContext('2d');
+  _skinCtx.imageSmoothingEnabled = false;
+
+  function drawTintedTile(tile, dx, dy, dw, dh, flip, tint, alpha) {
+    if (useProceduralSprites || !sheetReady) return false;
+    _skinCtx.clearRect(0, 0, 16, 16);
+    _skinCtx.globalCompositeOperation = 'source-over';
+    _skinCtx.globalAlpha = 1;
+    _skinCtx.drawImage(spritesheet, tile.x, tile.y, 16, 16, 0, 0, 16, 16);
+    _skinCtx.globalCompositeOperation = 'source-atop'; // recolour only the sprite
+    _skinCtx.globalAlpha = alpha;
+    _skinCtx.fillStyle = tint;
+    _skinCtx.fillRect(0, 0, 16, 16);
+    _skinCtx.globalAlpha = 1;
+    _skinCtx.globalCompositeOperation = 'source-over';
+    ctx.imageSmoothingEnabled = false;
+    if (flip) {
+      ctx.save();
+      ctx.translate(dx + dw, dy);
+      ctx.scale(-1, 1);
+      ctx.drawImage(_skinBuf, 0, 0, 16, 16, 0, 0, dw, dh);
+      ctx.restore();
+    } else {
+      ctx.drawImage(_skinBuf, 0, 0, 16, 16, dx, dy, dw, dh);
     }
     return true;
   }
@@ -421,6 +453,10 @@
   window.addEventListener('keydown', function (e) {
     ensureAudio();
     keys[e.code] = true;
+    // snapshot the state up front: a branch below may transition (e.g. mode
+    // select -> class select), and standalone if-blocks further down must not
+    // then also fire for the same key (a number key would skip class select)
+    var stateAtStart = game.gameState;
     if (game.gameState === 'nameentry') {
       if (e.code === 'Escape') {
         pendingMode = 'normal';
@@ -485,6 +521,10 @@
       var si = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4 };
       if (e.code in si) tryBuyShopItem(si[e.code]);
       if (e.code === 'Escape' || e.code === 'KeyS') game.gameState = 'title';
+    } else if (game.gameState === 'wardrobe') {
+      if (e.code === 'Escape') game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title';
+      else if (e.code === 'ArrowLeft') { wardrobeClass = prevClassId(wardrobeClass); wardrobeScroll = 0; skinPending = null; }
+      else if (e.code === 'ArrowRight') { wardrobeClass = nextClassId(wardrobeClass); wardrobeScroll = 0; skinPending = null; }
     } else if (game.gameState === 'achievements') {
       if (e.code === 'Escape' || e.code === 'KeyA') game.gameState = 'title';
     } else if (game.gameState === 'settings') {
@@ -498,12 +538,9 @@
       if (game.gameState === 'playing') game.gameState = 'paused';
       else if (game.gameState === 'paused') game.gameState = 'playing';
     }
-    if (game.gameState === 'classselect') {
-      var classKeys = { Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 };
-      if (e.code in classKeys) {
-        currentClass = CLASSES[classKeys[e.code]].id;
-        startGame();
-      }
+    if (stateAtStart === 'classselect' && game.gameState === 'classselect') {
+      var classKeys = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3 };
+      if (e.code in classKeys) selectClassByIndex(classKeys[e.code]);
     }
     // Prevent arrow keys / space scrolling the page.
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].indexOf(e.code) !== -1) {
@@ -582,7 +619,19 @@
   });
 
   function handlePointerAt(p) {
+    // shared back button (top-left) on every menu screen
+    if (BACK_STATES[game.gameState] &&
+        p.x >= BACK_BTN.x && p.x <= BACK_BTN.x + BACK_BTN.w &&
+        p.y >= BACK_BTN.y && p.y <= BACK_BTN.y + BACK_BTN.h) {
+      goBack();
+      return;
+    }
     if (game.gameState === 'title') {
+      // glowing SHOP icon
+      if ((p.x - SHOP_ICON.cx) * (p.x - SHOP_ICON.cx) + (p.y - SHOP_ICON.cy) * (p.y - SHOP_ICON.cy) <= (SHOP_ICON.r + 5) * (SHOP_ICON.r + 5)) {
+        openWardrobe('title');
+        return;
+      }
       var btns = titleButtons();
       for (var bi = 0; bi < btns.length; bi++) {
         var b = btns[bi];
@@ -642,15 +691,37 @@
       if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 40 && p.y <= 60) toggleAllSound();
       else game.gameState = 'playing';
     } else if (game.gameState === 'shop') {
-      var bought = false;
+      var acted = false;
       for (var sr = 0; sr < SHOP_ITEMS.length; sr++) {
-        var rr = shopRowRect(sr);
+        var rr = shopRowRect(sr), ur = shopUpgradeRect(sr);
+        if (p.x >= ur.x && p.x <= ur.x + ur.w && p.y >= ur.y && p.y <= ur.y + ur.h) {
+          tryBuyShopItem(sr); acted = true; break;   // right button = upgrade
+        }
         if (p.x >= rr.x && p.x <= rr.x + rr.w && p.y >= rr.y && p.y <= rr.y + rr.h) {
-          tryBuyShopItem(sr);
-          bought = true;
+          toggleTomeEquip(sr); acted = true; break;  // rest of row = equip toggle
         }
       }
-      if (!bought && p.y > 230) game.gameState = 'title';
+      if (!acted && p.y > 230) game.gameState = 'title';
+    } else if (game.gameState === 'wardrobe') {
+      // character selector tabs
+      var tabW = 108, gap = 6, total = CLASSES.length * tabW + (CLASSES.length - 1) * gap;
+      var tx0 = (W - total) / 2, tHit = false;
+      for (var wc = 0; wc < CLASSES.length; wc++) {
+        var tx = tx0 + wc * (tabW + gap);
+        if (p.x >= tx && p.x <= tx + tabW && p.y >= 44 && p.y <= 64) {
+          wardrobeClass = CLASSES[wc].id; wardrobeScroll = 0; skinPending = null; tHit = true; break;
+        }
+      }
+      if (!tHit) {
+        var slist = SKINS[wardrobeClass] || [], sHit = false;
+        for (var sk = 0; sk < slist.length; sk++) {
+          var scr = skinCardRect(sk);
+          if (p.x >= scr.x && p.x <= scr.x + scr.w && p.y >= scr.y && p.y <= scr.y + scr.h) {
+            selectSkin(wardrobeClass, slist[sk].id); sHit = true; break;
+          }
+        }
+        if (!sHit && p.y > 244) game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title';
+      }
     } else if (game.gameState === 'modeselect') {
       for (var mc = 0; mc < MODE_CARDS.length; mc++) {
         var mcard = MODE_CARDS[mc];
@@ -658,10 +729,6 @@
           startModeGate(mcard.id);
           return;
         }
-      }
-      if (p.x >= MODE_BACK.x && p.x <= MODE_BACK.x + MODE_BACK.w &&
-          p.y >= MODE_BACK.y && p.y <= MODE_BACK.y + MODE_BACK.h) {
-        game.gameState = 'title';
       }
     } else if (game.gameState === 'achievements' || game.gameState === 'codex') {
       game.gameState = 'title';
@@ -826,15 +893,53 @@
   // ---------------------------------------------------------------------------
   // VAULT SHOP — permanent buffs bought with coins between runs
   // ---------------------------------------------------------------------------
+  // Tomes: the permanent coin-bought perks. Owned/levelled with coins in The
+  // Vault, but only 3 can be equipped per run (runData.equippedTomes).
   var SHOP_ITEMS = [
-    { id: 'vit', name: 'VITALITY',  desc: '+20 START HP PER LVL' },
-    { id: 'mig', name: 'MIGHT',     desc: '+10% DAMAGE PER LVL' },
-    { id: 'swf', name: 'SWIFTNESS', desc: '+5 MOVE SPEED PER LVL' },
-    { id: 'wis', name: 'WISDOM',    desc: '+10% XP PER LVL' },
-    { id: 'frt', name: 'FORTUNE',   desc: '+25% COINS PER LVL' }
+    { id: 'vit', name: 'VITALITY',  desc: '+20 START HP PER LVL',  color: '#e0555e' },
+    { id: 'mig', name: 'MIGHT',     desc: '+10% DAMAGE PER LVL',   color: '#ff8c3a' },
+    { id: 'swf', name: 'SWIFTNESS', desc: '+5 MOVE SPEED PER LVL', color: '#54a0ff' },
+    { id: 'wis', name: 'WISDOM',    desc: '+10% XP PER LVL',       color: '#a06cff' },
+    { id: 'frt', name: 'FORTUNE',   desc: '+25% COINS PER LVL',    color: '#FFD700' }
   ];
   var SHOP_PRICES = [50, 120, 250, 450, 700];
+  var MAX_EQUIPPED_TOMES = 3;
 
+  // ---------------------------------------------------------------------------
+  // HERO SKINS (cosmetic only — reskin the actual hero sprite, no gameplay effect)
+  // Each class has a free DEFAULT, plus BASIC recolors and EPIC chroma skins.
+  // Epic skins are colour-morphing and locked until the player has reached wave 20.
+  // Built to hold many more skins per class later.
+  // ---------------------------------------------------------------------------
+  var SKINS = {
+    warrior: [
+      { id: 'warrior_default', name: 'DEFAULT', tier: 'default' },
+      { id: 'warrior_ember',   name: 'EMBERCLAD', tier: 'basic', tint: '#ff6a3a', price: 1500 },
+      { id: 'warrior_prism',   name: 'WARLORD PRISM', tier: 'epic', chroma: true, price: 12000 }
+    ],
+    rogue: [
+      { id: 'rogue_default', name: 'DEFAULT', tier: 'default' },
+      { id: 'rogue_shadow',  name: 'NIGHTSHADE', tier: 'basic', tint: '#7a4bd0', price: 1500 },
+      { id: 'rogue_prism',   name: 'PHANTOM PRISM', tier: 'epic', chroma: true, price: 12000 }
+    ],
+    mage: [
+      { id: 'mage_default', name: 'DEFAULT', tier: 'default' },
+      { id: 'mage_frost',   name: 'FROSTWEAVE', tier: 'basic', tint: '#4ac8ff', price: 1500 },
+      { id: 'mage_prism',   name: 'ARCANE PRISM', tier: 'epic', chroma: true, price: 12000 }
+    ],
+    ranger: [
+      { id: 'ranger_default', name: 'DEFAULT', tier: 'default' },
+      { id: 'ranger_verdant', name: 'VERDANT', tier: 'basic', tint: '#4fd06a', price: 1500 },
+      { id: 'ranger_prism',   name: 'HUNTER PRISM', tier: 'epic', chroma: true, price: 12000 }
+    ]
+  };
+  var EPIC_SKIN_WAVE = 20; // epic skins unlock only after reaching this wave
+  var skinPending = null;      // skin id armed for a confirm-tap purchase
+  var wardrobeClass = 'warrior'; // which character's skins the wardrobe is showing
+  var wardrobeScroll = 0;      // horizontal card-scroll offset (px)
+  var wardrobeFrom = 'title';  // return target: 'title' or 'classselect'
+
+  // Buy the next level of a tome with coins.
   function tryBuyShopItem(idx) {
     var item = SHOP_ITEMS[idx];
     if (!item) return;
@@ -844,8 +949,106 @@
     if (runData.coins < price) return;
     runData.coins -= price;
     runData.shop[item.id] = lvl + 1;
+    // first level bought auto-equips it if there's a free slot (nice default)
+    if (lvl === 0 && runData.equippedTomes.indexOf(item.id) === -1 &&
+        runData.equippedTomes.length < MAX_EQUIPPED_TOMES) {
+      runData.equippedTomes.push(item.id);
+    }
     saveRunData();
     playPickup();
+  }
+
+  function isTomeEquipped(id) {
+    return runData.equippedTomes.indexOf(id) !== -1;
+  }
+
+  // Equipped tome level (0 if not equipped, or in Daily where tomes are off for
+  // a level playing field). Used everywhere a tome bonus is applied.
+  function tomeLevel(id) {
+    if (game.mode === 'daily') return 0;
+    return isTomeEquipped(id) ? (runData.shop[id] || 0) : 0;
+  }
+
+  function hexToRgba(hex, a) {
+    var h = hex.replace('#', '');
+    var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
+
+  // ---- hero skins ----
+  function skinOwned(id) {
+    // default skins are always owned/free
+    return id.indexOf('_default') !== -1 || !!runData.skinsOwned[id];
+  }
+  function equippedSkinId(classId) {
+    return runData.equippedSkins[classId] || (classId + '_default');
+  }
+  function skinById(classId, id) {
+    var list = SKINS[classId] || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return list[0];
+  }
+  function epicUnlocked() { return (runData.bestWave || 1) >= EPIC_SKIN_WAVE; }
+
+  // The chroma tint colour for epic skins, morphing hue over time.
+  function chromaColor() {
+    return 'hsl(' + Math.floor((game.time * 90) % 360) + ',95%,58%)';
+  }
+
+  // Buy (two-tap confirm), equip, or report why a skin can't be selected.
+  function selectSkin(classId, id) {
+    var skin = skinById(classId, id);
+    if (!skin) return;
+    if (skinOwned(id)) {
+      skinPending = null;
+      runData.equippedSkins[classId] = id;
+      saveRunData();
+      playPickup();
+      return;
+    }
+    if (skin.tier === 'epic' && !epicUnlocked()) {
+      skinPending = null;
+      game.toasts.push({ txt: 'REACH WAVE ' + EPIC_SKIN_WAVE + ' TO UNLOCK', t: 0 });
+      return;
+    }
+    if (skinPending === id) {
+      skinPending = null;
+      if (runData.coins >= skin.price) {
+        runData.coins -= skin.price;
+        runData.skinsOwned[id] = true;
+        runData.equippedSkins[classId] = id; // equip on purchase
+        saveRunData();
+        game.toasts.push({ txt: skin.name + ' UNLOCKED!', t: 0 });
+      } else {
+        game.toasts.push({ txt: 'NEED ' + skin.price + ' COINS (HAVE ' + Math.round(runData.coins) + ')', t: 0 });
+      }
+    } else if (runData.coins >= skin.price) {
+      skinPending = id;
+    } else {
+      game.toasts.push({ txt: 'NEED ' + skin.price + ' COINS (HAVE ' + Math.round(runData.coins) + ')', t: 0 });
+    }
+  }
+
+  // Toggle a tome in/out of the 3-slot loadout. Returns a message for the UI.
+  function toggleTomeEquip(idx) {
+    var item = SHOP_ITEMS[idx];
+    if (!item) return;
+    var pos = runData.equippedTomes.indexOf(item.id);
+    if (pos !== -1) {
+      runData.equippedTomes.splice(pos, 1);
+      saveRunData();
+      return;
+    }
+    if ((runData.shop[item.id] || 0) < 1) {
+      game.toasts.push({ txt: 'UPGRADE THIS TOME FIRST', t: 0 });
+      return;
+    }
+    if (runData.equippedTomes.length >= MAX_EQUIPPED_TOMES) {
+      game.toasts.push({ txt: 'MAX ' + MAX_EQUIPPED_TOMES + ' TOMES — UNEQUIP ONE', t: 0 });
+      return;
+    }
+    runData.equippedTomes.push(item.id);
+    saveRunData();
   }
 
   // ---------------------------------------------------------------------------
@@ -1010,6 +1213,9 @@
              seenFeedbackPrompt: false,
              playerDisc: '', playerSecret: '', playerId: '',
              shop: { vit: 0, mig: 0, swf: 0, wis: 0, frt: 0 },
+             equippedTomes: [], // up to 3 tome ids active per run
+             classesOwned: {}, // coin-unlocked classes (e.g. ranger); base 3 are free
+             skinsOwned: {}, equippedSkins: {}, // coin-bought hero skins (per class)
              achievements: {} };
   }
 
@@ -1024,6 +1230,14 @@
       if (!raw) return def;
       var data = JSON.parse(raw);
       for (var k in def) if (!(k in data)) data[k] = def[k];
+      // migrate players from the old always-on perks: auto-equip their 3
+      // highest-level tomes so their existing investment still applies
+      if (!data.equippedTomes || data.equippedTomes.length === 0) {
+        var leveled = ['vit', 'mig', 'swf', 'wis', 'frt']
+          .filter(function (id) { return (data.shop[id] || 0) > 0; })
+          .sort(function (a, b) { return (data.shop[b] || 0) - (data.shop[a] || 0); });
+        data.equippedTomes = leveled.slice(0, 3);
+      }
       return data;
     } catch (e) {
       // malformed JSON from an older version — reset the stored key to defaults
@@ -1166,18 +1380,42 @@
   var CLASSES = [
     { id: 'warrior', name: 'WARRIOR', color: '#cc3333', hp: 200, speed: 60,  damage: 32, cooldown: 1.2, pierce: 0, homingBase: 0,    bars: [5, 2, 4], tile: TILE.heroWarrior },
     { id: 'rogue',   name: 'ROGUE',   color: '#33cc66', hp: 70,  speed: 125, damage: 14, cooldown: 0.4, pierce: 0, homingBase: 0,    bars: [2, 5, 2], tile: TILE.heroRogue },
-    { id: 'mage',    name: 'MAGE',    color: '#6633cc', hp: 80,  speed: 70,  damage: 40, cooldown: 1.0, pierce: 1, homingBase: 0.06, bars: [2, 2, 5], tile: TILE.heroMage }
+    { id: 'mage',    name: 'MAGE',    color: '#6633cc', hp: 80,  speed: 70,  damage: 40, cooldown: 1.0, pierce: 1, homingBase: 0.06, bars: [2, 2, 5], tile: TILE.heroMage },
+    // Ranger: coin-unlocked 4th class — fragile, slow fire, but long fast arrows
+    // with innate pierce. Skill/positioning class. shotSpeed overrides the 200 default.
+    { id: 'ranger',  name: 'RANGER',  color: '#c99a3a', hp: 65,  speed: 90,  damage: 34, cooldown: 0.9, pierce: 2, homingBase: 0,    bars: [2, 3, 5], tile: { x: 64, y: 144 }, shotSpeed: 340, price: 10000 }
   ];
 
   function classDef(id) {
     for (var i = 0; i < CLASSES.length; i++) if (CLASSES[i].id === id) return CLASSES[i];
     return CLASSES[0];
   }
+  function classIndex(id) {
+    for (var i = 0; i < CLASSES.length; i++) if (CLASSES[i].id === id) return i;
+    return 0;
+  }
+  function prevClassId(id) { return CLASSES[(classIndex(id) + CLASSES.length - 1) % CLASSES.length].id; }
+  function nextClassId(id) { return CLASSES[(classIndex(id) + 1) % CLASSES.length].id; }
+
+  // Open the skin wardrobe, remembering where to return to.
+  function openWardrobe(from, classId) {
+    wardrobeFrom = from;
+    wardrobeClass = classId || wardrobeClass || 'warrior';
+    wardrobeScroll = 0;
+    skinPending = null;
+    game.gameState = 'wardrobe';
+  }
   var currentClass = 'warrior';
   var classCards = [];
+  var classUnlockPending = null; // class id armed for a confirm tap to purchase
+
+  function classOwned(cls) {
+    return !cls.price || !!runData.classesOwned[cls.id];
+  }
 
   function enterClassSelect() {
-    var cardW = 120, cardH = 140, gap = 16;
+    classUnlockPending = null;
+    var cardW = 106, cardH = 140, gap = 10;
     var totalW = CLASSES.length * cardW + (CLASSES.length - 1) * gap;
     var startX = (W - totalW) / 2;
     classCards = CLASSES.map(function (c, i) {
@@ -1186,15 +1424,51 @@
     game.gameState = 'classselect';
   }
 
+  // Shared select/purchase logic for both click and number-key input.
+  function selectClassByIndex(i) {
+    var cls = CLASSES[i];
+    if (!cls) return;
+    if (classOwned(cls)) {
+      classUnlockPending = null;
+      currentClass = cls.id;
+      startGame();
+      return;
+    }
+    // locked class: first tap arms the buy, second confirms (guards a 10k misclick)
+    if (classUnlockPending === cls.id) {
+      classUnlockPending = null;
+      if (runData.coins >= cls.price) {
+        runData.coins -= cls.price;
+        runData.classesOwned[cls.id] = true;
+        saveRunData();
+        game.toasts.push({ txt: cls.name + ' UNLOCKED!', t: 0 });
+      } else {
+        game.toasts.push({ txt: 'NEED ' + cls.price + ' COINS (HAVE ' + Math.round(runData.coins) + ')', t: 0 });
+      }
+    } else if (runData.coins >= cls.price) {
+      classUnlockPending = cls.id;
+    } else {
+      game.toasts.push({ txt: 'NEED ' + cls.price + ' COINS (HAVE ' + Math.round(runData.coins) + ')', t: 0 });
+    }
+  }
+
+  var CLASS_COSM_BTN = { x: (W - 120) / 2, y: 216, w: 120, h: 20 }; // centred below the cards
+
   function tryPickClass(mx, my) {
+    // cosmetics shop (back is the shared top-left button)
+    if (mx >= CLASS_COSM_BTN.x && mx <= CLASS_COSM_BTN.x + CLASS_COSM_BTN.w &&
+        my >= CLASS_COSM_BTN.y && my <= CLASS_COSM_BTN.y + CLASS_COSM_BTN.h) {
+      openWardrobe('classselect', currentClass);
+      return;
+    }
     for (var i = 0; i < classCards.length; i++) {
       var c = classCards[i];
       if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) {
-        currentClass = c.cls.id;
-        startGame();
+        selectClassByIndex(i);
         return;
       }
     }
+    classUnlockPending = null; // clicking empty space cancels an armed purchase
   }
 
   // ---------------------------------------------------------------------------
@@ -1416,12 +1690,12 @@
     pl.attackCooldown = cls.cooldown;
     pl.pierce = cls.pierce;
     pl.homingBase = cls.homingBase;
-    // permanent vault-shop perks on top of class stats
-    var shop = runData.shop;
-    pl.maxHp += 20 * shop.vit; pl.hp = pl.maxHp;
-    pl.damage = Math.round(pl.damage * (1 + 0.1 * shop.mig));
-    pl.speed += 5 * shop.swf;
-    pl.xpMult *= (1 + 0.1 * shop.wis);
+    if (cls.shotSpeed) pl.shotSpeed = cls.shotSpeed; // ranger: fast arrows
+    // equipped tomes on top of class stats (only the 3 equipped apply; none in Daily)
+    pl.maxHp += 20 * tomeLevel('vit'); pl.hp = pl.maxHp;
+    pl.damage = Math.round(pl.damage * (1 + 0.1 * tomeLevel('mig')));
+    pl.speed += 5 * tomeLevel('swf');
+    pl.xpMult *= (1 + 0.1 * tomeLevel('wis'));
     buildFloor();
     beginWave(1);
     setMusicTrack('combat');
@@ -2359,7 +2633,7 @@
     }
     game.score++;
     game.waveKills++;
-    game.coinsEarned += (1 + Math.floor(game.wave / 5)) * (1 + 0.25 * runData.shop.frt) * p.coinMult;
+    game.coinsEarned += (1 + Math.floor(game.wave / 5)) * (1 + 0.25 * tomeLevel('frt')) * p.coinMult;
     if (game.score === 1) unlockAch('first_blood');
     game.hitStop = Math.max(game.hitStop, 0.03); // tiny punch on every kill
     maybeDropPickup(en.x, en.y);
@@ -2449,7 +2723,7 @@
     if (en.name) spawnFloatText(en.x, en.y - 22, en.name + ' SLAIN', en.color);
     playBossDeath();
     unlockAch('boss_slayer');
-    game.coinsEarned += 25 * (1 + 0.25 * runData.shop.frt) * game.player.coinMult;
+    game.coinsEarned += 25 * (1 + 0.25 * tomeLevel('frt')) * game.player.coinMult;
     game.whiteFlash = 3;          // flash white for 3 frames
     game.shakeTimer = 0.5;
     game.hitStop = 0.2;           // dramatic freeze-frame
@@ -2745,12 +3019,25 @@
     var dx = Math.round(p.x - 8);
     var dy = Math.round(p.y - 8);
     var bob = (p.moving && Math.floor(p.walkAnim) % 2 === 0) ? -1 : 0;
-    // each class has its own hero sprite
+    // equipped hero skin: reskins the actual sprite (no obstructing aura)
+    var skin = skinById(currentClass, equippedSkinId(currentClass));
+    var tint = skin && skin.chroma ? chromaColor() : (skin ? skin.tint : null);
     var tile = classDef(currentClass).tile;
-    var drew = drawTile(tile, dx, dy + bob, 16, 16, p.facing === -1);
+    var drew;
+    if (tint) {
+      drew = drawTintedTile(tile, dx, dy + bob, 16, 16, p.facing === -1, tint, skin.chroma ? 0.62 : 0.5);
+      // epic skins get a tight 1px chroma glow that hugs the sprite (not a ring)
+      if (skin.chroma && drew) {
+        ctx.globalAlpha = 0.25 + 0.15 * Math.sin(game.time * 6);
+        drawTintedTile(tile, dx - 1, dy + bob, 18, 18, p.facing === -1, tint, 1);
+        ctx.globalAlpha = 1;
+      }
+    } else {
+      drew = drawTile(tile, dx, dy + bob, 16, 16, p.facing === -1);
+    }
     if (!drew) {
-      // procedural: 12x16 white body + 4x4 cyan head
-      ctx.fillStyle = '#fff';
+      // procedural: body uses the skin tint if any, else white
+      ctx.fillStyle = tint || '#fff';
       ctx.fillRect(Math.round(p.x - 6), Math.round(p.y - 8) + bob, 12, 16);
       ctx.fillStyle = '#00e5ff';
       ctx.fillRect(Math.round(p.x - 2), Math.round(p.y - 8) + bob, 4, 4);
@@ -2984,13 +3271,13 @@
     for (var i = 0; i < game.projectiles.length; i++) {
       var pr = game.projectiles[i];
       // class identity: rogues throw daggers, warriors spinning axes,
-      // the mage keeps his glowing orbs
+      // rangers arrows, the mage keeps his glowing orbs
       if (currentClass === 'rogue') { drawDagger(pr); continue; }
       if (currentClass === 'warrior') { drawAxe(pr); continue; }
-      // glow
+      if (currentClass === 'ranger') { drawArrow(pr); continue; }
+      // glow + core
       ctx.fillStyle = 'rgba(255,230,0,0.3)';
       ctx.fillRect(Math.round(pr.x - 3), Math.round(pr.y - 3), 6, 6);
-      // core
       ctx.fillStyle = '#ffe600';
       ctx.fillRect(Math.round(pr.x - 2), Math.round(pr.y - 2), 4, 4);
     }
@@ -3002,6 +3289,23 @@
       ctx.fillStyle = '#ff44aa';
       ctx.fillRect(Math.round(sh.x - 2), Math.round(sh.y - 2), 4, 4);
     }
+  }
+
+  // Ranger arrow: long thin shaft pointing along its flight direction, with a
+  // steel head and amber fletching. Reads as a fast projectile at range.
+  function drawArrow(pr) {
+    ctx.save();
+    ctx.translate(Math.round(pr.x), Math.round(pr.y));
+    ctx.rotate(Math.atan2(pr.vy, pr.vx)); // 0deg art points along +x (travel dir)
+    ctx.fillStyle = '#2a2135';    // dark outline
+    ctx.fillRect(-8, -2, 16, 4);
+    ctx.fillStyle = '#c99a3a';    // wooden shaft
+    ctx.fillRect(-7, -1, 11, 2);
+    ctx.fillStyle = '#e8eef8';    // steel head
+    ctx.fillRect(4, -2, 4, 4);
+    ctx.fillStyle = '#e0a030';    // fletching
+    ctx.fillRect(-7, -2, 2, 4);
+    ctx.restore();
   }
 
   // Rogue dagger: slim steel blade pointing along its flight direction,
@@ -3294,7 +3598,7 @@
     for (var i = 0; i < ACHIEVEMENTS.length; i++) if (runData.achievements[ACHIEVEMENTS[i].id]) unlocked++;
     return [
       { id: 'play',     label: 'PLAY',                                          hint: 'ENTER', x: 24, y: 80,  w: 172, h: 42, big: true },
-      { id: 'shop',     label: 'THE VAULT: UPGRADES ' + Math.round(runData.coins) + 'c', hint: 'S', x: 24, y: 130, w: 172, h: 22 },
+      { id: 'shop',     label: 'THE VAULT  ' + Math.round(runData.coins) + 'c', hint: 'S', x: 24, y: 130, w: 172, h: 22 },
       { id: 'awards',   label: 'AWARDS — ' + unlocked + '/' + ACHIEVEMENTS.length, hint: 'A', x: 24, y: 158, w: 172, h: 22 },
       { id: 'codex',    label: 'RECIPE CODEX',                                  hint: 'R', x: 24, y: 186, w: 172, h: 22 },
       { id: 'settings', label: 'SETTINGS',                                      hint: 'T', x: 24, y: 214, w: 172, h: 22 }
@@ -3332,6 +3636,33 @@
 
   // leaderboard panel geometry (also used for click handling)
   var LB_PANEL = { x: 210, y: 80, w: 246, h: 156 };
+  var SHOP_ICON = { cx: 446, cy: 58, r: 11 }; // glowing SHOP button above the board's corner
+
+  // Shared back button, drawn top-left on every menu screen (never in gameplay).
+  var BACK_BTN = { x: 6, y: 6, w: 62, h: 16 };
+  function drawBackButton() {
+    var b = BACK_BTN;
+    var hover = mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h;
+    ctx.fillStyle = hover ? '#2a2a3e' : '#14141e';
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.strokeStyle = hover ? '#FFD700' : '#444466';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+    text('< BACK', b.x + b.w / 2, b.y + 5, 6, hover ? '#ffffff' : '#aaaaaa', 'center');
+  }
+  // Where "back" leads from each menu screen.
+  function goBack() {
+    var s = game.gameState;
+    if (s === 'wardrobe') { game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title'; return; }
+    if (s === 'login') { game.gameState = 'account'; return; }
+    if (s === 'nameentry') { pendingMode = 'normal'; blurNameInput(); game.gameState = 'title'; return; }
+    if (s === 'feedback') { game.gameState = 'title'; maybeRefreshLeaderboard(); return; }
+    game.gameState = 'title';
+  }
+  // menu states that show the shared back button (everything but title + gameplay)
+  var BACK_STATES = { shop: 1, wardrobe: 1, settings: 1, account: 1, accountinfo: 1,
+    achievements: 1, codex: 1, login: 1, nameentry: 1, modeselect: 1, classselect: 1,
+    feedback: 1, gameover: 1 };
 
   function fmtKills(k) {
     if (k >= 1000) {
@@ -3438,6 +3769,40 @@
     }
     text('WASD MOVE — AUTO-FIRE — P PAUSE', W / 2, 259, 6, '#555555', 'center');
     text('v' + GAME_VERSION, 6, 258, 6, '#555566');
+
+    // ----- glowing SHOP button (a coin bag; draws attention to cosmetics) -----
+    var si = SHOP_ICON, chp = chromaColor(), pulse = 0.5 + 0.5 * Math.sin(game.time * 4);
+    var siHover = (mouse.x - si.cx) * (mouse.x - si.cx) + (mouse.y - si.cy) * (mouse.y - si.cy) < (si.r + 5) * (si.r + 5);
+    ctx.globalAlpha = 0.22 + 0.28 * pulse;
+    ctx.fillStyle = chp;
+    ctx.beginPath(); ctx.arc(si.cx, si.cy, si.r + 4 + pulse * 3, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = siHover ? '#26263a' : '#161622';
+    ctx.beginPath(); ctx.arc(si.cx, si.cy, si.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = chp; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(si.cx, si.cy, si.r, 0, Math.PI * 2); ctx.stroke();
+    // coathanger (wardrobe): triangular body, bottom bar, little hook
+    var hx = si.cx, hy = si.cy + 2;
+    ctx.strokeStyle = '#f0d878';
+    ctx.lineWidth = 1.6;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();                       // body triangle
+    ctx.moveTo(hx - 7, hy + 3);
+    ctx.lineTo(hx, hy - 2);
+    ctx.lineTo(hx + 7, hy + 3);
+    ctx.stroke();
+    ctx.beginPath();                       // bottom bar
+    ctx.moveTo(hx - 7, hy + 3);
+    ctx.lineTo(hx + 7, hy + 3);
+    ctx.stroke();
+    ctx.beginPath();                       // hook
+    ctx.moveTo(hx, hy - 2);
+    ctx.lineTo(hx, hy - 5);
+    ctx.quadraticCurveTo(hx + 3, hy - 8, hx + 1, hy - 8);
+    ctx.stroke();
+    ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
+    text('SHOP', si.cx, si.cy + si.r + 2, 6, '#FFD700', 'center');
   }
 
   function renderSettings() {
@@ -3736,15 +4101,23 @@
   function drawClassIcon(id, x, y) {
     // x,y is the top-left of a 40x40 icon area
     if (id === 'warrior') {
-      // sword: vertical blade, horizontal crossguard, pommel — grey and gold
-      ctx.fillStyle = '#c0c8d0';
-      ctx.fillRect(x + 17, y + 4, 6, 18);
-      ctx.fillStyle = '#FFD700';
-      ctx.fillRect(x + 12, y + 22, 16, 4);
-      ctx.fillStyle = '#c0c8d0';
-      ctx.fillRect(x + 18, y + 26, 4, 8);
-      ctx.fillStyle = '#FFD700';
-      ctx.fillRect(x + 17, y + 34, 6, 4);
+      // twin-bladed axe, matching the warrior's in-game projectile
+      ctx.fillStyle = '#7a5a30';           // wooden haft
+      ctx.fillRect(x + 18, y + 6, 4, 30);
+      ctx.fillStyle = '#5a4020';           // haft cap
+      ctx.fillRect(x + 17, y + 33, 6, 3);
+      ctx.fillStyle = '#b8c4d4';           // steel double head
+      ctx.beginPath();                     // left blade
+      ctx.moveTo(x + 18, y + 8); ctx.lineTo(x + 6, y + 11);
+      ctx.lineTo(x + 6, y + 21); ctx.lineTo(x + 18, y + 24);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();                     // right blade
+      ctx.moveTo(x + 22, y + 8); ctx.lineTo(x + 34, y + 11);
+      ctx.lineTo(x + 34, y + 21); ctx.lineTo(x + 22, y + 24);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#e8eef8';           // edge shine
+      ctx.fillRect(x + 6, y + 12, 2, 8);
+      ctx.fillRect(x + 32, y + 12, 2, 8);
     } else if (id === 'rogue') {
       // dagger tilted 45 degrees, dark green tones
       ctx.save();
@@ -3771,6 +4144,26 @@
       ctx.fillStyle = '#b794f6';
       ctx.fillRect(x + 13, y + 16, 14, 2);
       ctx.fillRect(x + 15, y + 22, 10, 2);
+    } else if (id === 'ranger') {
+      // bow: curved limb + string with a nocked arrow, amber
+      ctx.strokeStyle = '#c99a3a';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x + 12, y + 20, 12, -Math.PI / 2.3, Math.PI / 2.3);
+      ctx.stroke();
+      var a0 = -Math.PI / 2.3, a1 = Math.PI / 2.3;
+      ctx.strokeStyle = '#dddddd';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + 12 + 12 * Math.cos(a0), y + 20 + 12 * Math.sin(a0));
+      ctx.lineTo(x + 12 + 12 * Math.cos(a1), y + 20 + 12 * Math.sin(a1));
+      ctx.stroke();
+      ctx.fillStyle = '#eaeaea';
+      ctx.fillRect(x + 12, y + 19, 20, 2);          // arrow shaft
+      ctx.fillStyle = '#c99a3a';
+      ctx.beginPath();                               // arrowhead
+      ctx.moveTo(x + 36, y + 20); ctx.lineTo(x + 31, y + 16); ctx.lineTo(x + 31, y + 24);
+      ctx.closePath(); ctx.fill();
     }
   }
 
@@ -3779,12 +4172,20 @@
     ctx.fillRect(0, 0, W, H);
     drawAnimatedScanlines(0.05);
 
-    text('CHOOSE YOUR CLASS', W / 2, 40, 10, '#FFD700', 'center');
+    text('CHOOSE YOUR CLASS', W / 2, 24, 10, '#FFD700', 'center');
+    // coin balance (matters for the coin-unlocked classes)
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(W / 2 - 44, 46, 5, 5);
+    ctx.fillStyle = '#aa8800';
+    ctx.fillRect(W / 2 - 43, 47, 3, 3);
+    text(Math.round(runData.coins) + ' COINS', W / 2 - 34, 45, 6, '#FFD700');
 
     var labels = ['HP', 'SPEED', 'POWER'];
     for (var i = 0; i < classCards.length; i++) {
       var c = classCards[i];
       var cls = c.cls;
+      var owned = classOwned(cls);
+      var pending = classUnlockPending === cls.id;
       var hover = mouse.x >= c.x && mouse.x <= c.x + c.w &&
                   mouse.y >= c.y && mouse.y <= c.y + c.h;
 
@@ -3794,33 +4195,89 @@
       ctx.fillStyle = '#101020';
       ctx.fillRect(c.x, c.y, c.w, c.h);
 
-      text(cls.name, c.x + c.w / 2, c.y + 10, 8, '#ffffff', 'center');
-      if (!useProceduralSprites && sheetReady) {
-        // hero sprite + weapon side by side
-        drawTile(cls.tile, c.x + c.w / 2 - 38, c.y + 32, 36, 36, false);
-        drawClassIcon(cls.id, c.x + c.w / 2 + 2, c.y + 30);
+      // hero sprite centred; weapon icon tucked in the corner
+      var spx = Math.round(c.x + c.w / 2 - 16);
+      if (drawTile(cls.tile, spx, c.y + 22, 32, 32, false)) {
+        drawClassIcon(cls.id, c.x + c.w - 36, c.y + 20);
       } else {
-        drawClassIcon(cls.id, c.x + c.w / 2 - 20, c.y + 30);
+        drawClassIcon(cls.id, c.x + c.w / 2 - 20, c.y + 22);
       }
-      text(String(i + 1), c.x + 8, c.y + 8, 6, '#666666');
 
-      // three 5-segment stat bars
+      // three compact 5-segment stat bars
       for (var b = 0; b < 3; b++) {
-        var by = c.y + 88 + b * 15;
-        text(labels[b], c.x + 8, by, 6, '#bbbbbb');
+        var by = c.y + 66 + b * 14;
+        text(labels[b], c.x + 6, by, 6, '#bbbbbb');
         for (var sg = 0; sg < 5; sg++) {
           ctx.fillStyle = sg < cls.bars[b] ? cls.color : '#2a2a3a';
-          ctx.fillRect(c.x + 58 + sg * 11, by, 8, 7);
+          ctx.fillRect(c.x + 44 + sg * 11, by, 8, 6);
         }
       }
+
+      // lock overlay for coin-unlocked classes
+      if (!owned) {
+        ctx.fillStyle = 'rgba(6,6,14,0.72)';
+        ctx.fillRect(c.x, c.y, c.w, c.h);
+        var lx = c.x + c.w / 2;
+        // padlock: shackle + body + keyhole
+        ctx.strokeStyle = '#FFD700';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(lx, c.y + 44, 4, Math.PI, 0);
+        ctx.stroke();
+        ctx.fillStyle = '#FFD700';
+        ctx.fillRect(lx - 6, c.y + 44, 12, 9);
+        ctx.fillStyle = '#101020';
+        ctx.fillRect(lx - 1, c.y + 47, 2, 3);
+        // unlock text sits below the (dimmed) stat bars, clear of them
+        if (pending) {
+          text('TAP AGAIN', lx, c.y + 110, 6, '#33cc66', 'center');
+          text('TO BUY ' + cls.price + 'c', lx, c.y + 124, 6, '#FFD700', 'center');
+        } else {
+          text('UNLOCK', lx, c.y + 110, 6, '#ffffff', 'center');
+          text(cls.price + 'c', lx, c.y + 124, 8, '#FFD700', 'center');
+        }
+      }
+
+      // name + number on top so they stay crisp over the lock overlay
+      text(cls.name, c.x + c.w / 2, c.y + 8, 7, '#ffffff', 'center');
+      text(String(i + 1), c.x + 6, c.y + 7, 6, '#666666');
     }
 
-    text('CLICK A CLASS OR PRESS 1-3 TO BEGIN', W / 2, 244, 6, '#888888', 'center');
+    // COSMETICS button, centred below the cards (back is the shared top-left button)
+    var ccb = CLASS_COSM_BTN;
+    var ccH = mouse.x >= ccb.x && mouse.x <= ccb.x + ccb.w && mouse.y >= ccb.y && mouse.y <= ccb.y + ccb.h;
+    ctx.fillStyle = ccH ? '#26263a' : '#161622';
+    ctx.fillRect(ccb.x, ccb.y, ccb.w, ccb.h);
+    ctx.strokeStyle = chromaColor(); ctx.lineWidth = 1;
+    ctx.strokeRect(ccb.x + 0.5, ccb.y + 0.5, ccb.w - 1, ccb.h - 1);
+    text('COSMETICS', ccb.x + ccb.w / 2, ccb.y + 6, 6, '#FFD700', 'center');
+
+    text('CLICK A CLASS OR PRESS 1-4', W / 2, 250, 6, '#888888', 'center');
   }
 
   // Shop rows are also used as click targets.
   function shopRowRect(i) {
-    return { x: 60, y: 64 + i * 32, w: W - 120, h: 28 };
+    return { x: 36, y: 66 + i * 33, w: 408, h: 29 };
+  }
+  // the "upgrade" button sub-region on the right of a tome row
+  function shopUpgradeRect(i) {
+    var r = shopRowRect(i);
+    return { x: r.x + r.w - 84, y: r.y + 5, w: 78, h: 19 };
+  }
+
+  // Small colored "tome" book icon (distinct colour per tome).
+  function drawTomeIcon(color, x, y, s) {
+    ctx.fillStyle = '#1a1a24';
+    ctx.fillRect(x - 1, y - 1, s + 2, s + 2);   // outline
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, s, s);                    // cover
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(x, y, 3, s);                    // spine shadow
+    ctx.fillStyle = '#f0ead8';
+    ctx.fillRect(x + s - 2, y + 1, 2, s - 2);    // page edge
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(x + 5, y + 4, s - 8, 1);        // emblem lines
+    ctx.fillRect(x + 5, y + 6, s - 10, 1);
   }
 
   function renderShop() {
@@ -3828,41 +4285,158 @@
     ctx.fillRect(0, 0, W, H);
     drawAnimatedScanlines(0.05);
 
-    text('THE VAULT', W / 2, 14, 10, '#FFD700', 'center');
-    text('COINS: ' + Math.round(runData.coins), W / 2, 34, 8, '#ffffff', 'center');
-
+    text('THE VAULT', W / 2, 12, 10, '#FFD700', 'center');
+    text('TOMES  —  EQUIP ' + runData.equippedTomes.length + '/' + MAX_EQUIPPED_TOMES +
+         '   ' + Math.round(runData.coins) + 'c', W / 2, 34, 6, '#ffffff', 'center');
     for (var i = 0; i < SHOP_ITEMS.length; i++) {
       var item = SHOP_ITEMS[i];
       var lvl = runData.shop[item.id] || 0;
+      var equipped = isTomeEquipped(item.id);
       var r = shopRowRect(i);
+      var ur = shopUpgradeRect(i);
       var hover = mouse.x >= r.x && mouse.x <= r.x + r.w && mouse.y >= r.y && mouse.y <= r.y + r.h;
+      var uHover = mouse.x >= ur.x && mouse.x <= ur.x + ur.w && mouse.y >= ur.y && mouse.y <= ur.y + ur.h;
       var maxed = lvl >= 5;
       var price = maxed ? 0 : SHOP_PRICES[lvl];
       var affordable = !maxed && runData.coins >= price;
 
-      ctx.fillStyle = hover ? '#2a2a3e' : '#16161f';
+      ctx.fillStyle = hover ? '#20202e' : '#16161f';
       ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.fillStyle = hover ? '#FFD700' : '#333344';
+      if (equipped) {
+        ctx.globalAlpha = 0.10; ctx.fillStyle = item.color;
+        ctx.fillRect(r.x, r.y, r.w, r.h); ctx.globalAlpha = 1;
+        ctx.fillStyle = item.color; ctx.fillRect(r.x, r.y, 3, r.h);
+      }
+      ctx.fillStyle = equipped ? item.color : '#333344';
       ctx.fillRect(r.x, r.y, r.w, 1);
       ctx.fillRect(r.x, r.y + r.h - 1, r.w, 1);
 
-      text((i + 1) + '.', r.x + 6, r.y + 6, 6, '#666666');
-      text(item.name, r.x + 24, r.y + 4, 6, '#ffffff');
-      text(item.desc, r.x + 24, r.y + 14, 6, '#888888');
-      // level pips
+      drawTomeIcon(item.color, r.x + 7, r.y + 7, 14);
+      text(item.name, r.x + 28, r.y + 5, 6, '#ffffff');
+      text(item.desc, r.x + 28, r.y + 16, 6, '#888888');
+
+      var mx = r.x + 214;
       for (var pip = 0; pip < 5; pip++) {
-        ctx.fillStyle = pip < lvl ? '#FFD700' : '#2a2a3a';
-        ctx.fillRect(r.x + 192 + pip * 10, r.y + 10, 7, 7);
+        ctx.fillStyle = pip < lvl ? item.color : '#2a2a3a';
+        ctx.fillRect(mx + pip * 9, r.y + 5, 6, 6);
       }
-      // price / status
-      if (maxed) {
-        text('MAX', r.x + r.w - 8, r.y + 10, 6, '#33cc66', 'right');
-      } else {
-        text(price + 'c', r.x + r.w - 8, r.y + 10, 6, affordable ? '#FFD700' : '#883333', 'right');
+      ctx.fillStyle = equipped ? '#33cc66' : '#2a2a3a';
+      ctx.fillRect(mx, r.y + 16, 7, 7);
+      if (equipped) { ctx.fillStyle = '#0d0d1a'; ctx.fillRect(mx + 2, r.y + 18, 3, 3); }
+      text(equipped ? 'EQUIPPED' : 'EQUIP', mx + 11, r.y + 17, 6, equipped ? '#33cc66' : '#777777');
+
+      ctx.fillStyle = uHover && affordable ? '#3a3a20' : '#0d0d14';
+      ctx.fillRect(ur.x, ur.y, ur.w, ur.h);
+      ctx.strokeStyle = maxed ? '#33cc66' : (affordable ? '#FFD700' : '#442222');
+      ctx.lineWidth = 1;
+      ctx.strokeRect(ur.x + 0.5, ur.y + 0.5, ur.w - 1, ur.h - 1);
+      if (maxed) text('MAX LVL', ur.x + ur.w / 2, ur.y + 7, 6, '#33cc66', 'center');
+      else text('UP ' + price + 'c', ur.x + ur.w / 2, ur.y + 7, 6, affordable ? '#FFD700' : '#883333', 'center');
+    }
+    text('TAP TOME = EQUIP (MAX 3)   TAP PRICE = UPGRADE', W / 2, 236, 6, '#888888', 'center');
+    text('TOMES ARE OFF IN DAILY  —  ESC / ENTER TO RETURN', W / 2, 248, 6, '#666666', 'center');
+  }
+
+  // ---------------------------------------------------------------------------
+  // WARDROBE — hero skin gallery (cosmetics, separate from The Vault's power)
+  // ---------------------------------------------------------------------------
+  function skinCardRect(i) {
+    return { x: 24 - wardrobeScroll + i * 146, y: 86, w: 134, h: 152 };
+  }
+  function wardrobeContentW() { return (SKINS[wardrobeClass] || []).length * 146 - 12; }
+  function wardrobeMaxScroll() { return Math.max(0, wardrobeContentW() - (W - 48)); }
+
+  // draw a class hero sprite with a skin applied, at (x,y,size)
+  function drawSkinPreview(classId, skin, x, y, size) {
+    var tile = classDef(classId).tile;
+    var tint = skin.chroma ? chromaColor() : skin.tint;
+    if (tint) {
+      if (skin.chroma) {
+        ctx.globalAlpha = 0.28 + 0.15 * Math.sin(game.time * 6);
+        drawTintedTile(tile, x - 2, y - 2, size + 4, size + 4, false, tint, 1);
+        ctx.globalAlpha = 1;
       }
+      if (!drawTintedTile(tile, x, y, size, size, false, tint, skin.chroma ? 0.62 : 0.5)) {
+        ctx.fillStyle = tint; ctx.fillRect(x, y, size, size);
+      }
+    } else if (!drawTile(tile, x, y, size, size, false)) {
+      ctx.fillStyle = classDef(classId).color; ctx.fillRect(x, y, size, size);
+    }
+  }
+
+  function drawSkinCard(skin, r) {
+    if (r.x + r.w < 0 || r.x > W) return; // scrolled off-screen
+    var owned = skinOwned(skin.id);
+    var equipped = equippedSkinId(wardrobeClass) === skin.id;
+    var pending = skinPending === skin.id;
+    var locked = skin.tier === 'epic' && !epicUnlocked();
+    var hover = mouse.x >= r.x && mouse.x <= r.x + r.w && mouse.y >= r.y && mouse.y <= r.y + r.h;
+    var accent = skin.tier === 'epic' ? (skin.chroma ? chromaColor() : '#ffd24a')
+                : (skin.tier === 'basic' ? '#54a0ff' : '#8890a0');
+
+    ctx.fillStyle = equipped ? '#33cc66' : (hover ? '#FFD700' : accent);
+    ctx.fillRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
+    ctx.fillStyle = '#101018';
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+
+    // tier ribbon
+    ctx.fillStyle = accent;
+    ctx.fillRect(r.x, r.y, r.w, 12);
+    text(skin.tier.toUpperCase(), r.x + r.w / 2, r.y + 3, 6, '#101018', 'center');
+
+    // preview sprite (dimmed if locked)
+    if (locked) ctx.globalAlpha = 0.35;
+    drawSkinPreview(wardrobeClass, skin, r.x + r.w / 2 - 24, r.y + 22, 48);
+    ctx.globalAlpha = 1;
+
+    text(skin.name, r.x + r.w / 2, r.y + 78, 6, '#ffffff', 'center');
+
+    // status line
+    if (equipped) {
+      text('EQUIPPED', r.x + r.w / 2, r.y + 116, 6, '#33cc66', 'center');
+    } else if (owned) {
+      text('TAP TO EQUIP', r.x + r.w / 2, r.y + 116, 6, '#aaaaaa', 'center');
+    } else if (locked) {
+      text('LOCKED', r.x + r.w / 2, r.y + 110, 6, '#ff5555', 'center');
+      text('REACH W' + EPIC_SKIN_WAVE, r.x + r.w / 2, r.y + 122, 6, '#ff8888', 'center');
+    } else {
+      var aff = runData.coins >= skin.price;
+      if (pending) text('TAP TO BUY', r.x + r.w / 2, r.y + 104, 6, '#33cc66', 'center');
+      text(skin.price + 'c', r.x + r.w / 2, r.y + (pending ? 118 : 112), 8, aff ? '#FFD700' : '#883333', 'center');
+    }
+  }
+
+  function renderWardrobe() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    drawAnimatedScanlines(0.05);
+    text('SKINS', W / 2, 10, 10, '#FFD700', 'center');
+    text(Math.round(runData.coins) + 'c', W / 2, 30, 6, '#FFD700', 'center');
+
+    // character selector
+    var tabW = 108, gap = 6, total = CLASSES.length * tabW + (CLASSES.length - 1) * gap;
+    var tx0 = (W - total) / 2;
+    for (var ci = 0; ci < CLASSES.length; ci++) {
+      var cls = CLASSES[ci];
+      var tx = tx0 + ci * (tabW + gap), ty = 44, th = 20;
+      var active = wardrobeClass === cls.id;
+      var hov = mouse.x >= tx && mouse.x <= tx + tabW && mouse.y >= ty && mouse.y <= ty + th;
+      ctx.fillStyle = active ? '#2a2a3e' : (hov ? '#1a1a26' : '#101018');
+      ctx.fillRect(tx, ty, tabW, th);
+      ctx.fillStyle = active ? cls.color : '#333344';
+      ctx.fillRect(tx, ty + th - 1, tabW, 1);
+      text(cls.name, tx + tabW / 2, ty + 7, 6, active ? '#ffffff' : '#888888', 'center');
     }
 
-    text('CLICK OR PRESS 1-5 TO BUY — ESC / ENTER TO RETURN', W / 2, 240, 6, '#888888', 'center');
+    var list = SKINS[wardrobeClass] || [];
+    for (var i = 0; i < list.length; i++) drawSkinCard(list[i], skinCardRect(i));
+
+    // scroll arrows when the cards overflow
+    if (wardrobeMaxScroll() > 0) {
+      if (wardrobeScroll > 4) text('<', 12, 156, 10, '#FFD700');
+      if (wardrobeScroll < wardrobeMaxScroll() - 4) text('>', W - 18, 156, 10, '#FFD700');
+    }
+    text('TAP CARD = EQUIP / BUY    ESC = BACK', W / 2, 252, 6, '#888888', 'center');
   }
 
   // play flow: pick a run mode before class select
@@ -3870,7 +4444,6 @@
     { id: 'normal', x: 48,  y: 62, w: 180, h: 142 },
     { id: 'daily',  x: 252, y: 62, w: 180, h: 142 }
   ];
-  var MODE_BACK = { x: 190, y: 226, w: 100, h: 20 };
 
   function renderModeSelect() {
     ctx.fillStyle = '#000';
@@ -3909,14 +4482,6 @@
       }
       text('CLICK TO PLAY', c.x + c.w / 2, c.y + 124, 6, hover ? '#ffffff' : '#555566', 'center');
     }
-
-    var bHover = mouse.x >= MODE_BACK.x && mouse.x <= MODE_BACK.x + MODE_BACK.w &&
-                 mouse.y >= MODE_BACK.y && mouse.y <= MODE_BACK.y + MODE_BACK.h;
-    ctx.fillStyle = bHover ? '#FFD700' : '#444466';
-    ctx.fillRect(MODE_BACK.x - 1, MODE_BACK.y - 1, MODE_BACK.w + 2, MODE_BACK.h + 2);
-    ctx.fillStyle = '#0d0d1a';
-    ctx.fillRect(MODE_BACK.x, MODE_BACK.y, MODE_BACK.w, MODE_BACK.h);
-    text('BACK (ESC)', MODE_BACK.x + MODE_BACK.w / 2, MODE_BACK.y + 7, 6, bHover ? '#ffffff' : '#cccccc', 'center');
 
     text('ENTER = QUICK-START STANDARD', W / 2, 256, 6, '#555566', 'center');
   }
@@ -4135,6 +4700,9 @@
     } else if (game.gameState === 'shop') {
       renderShop();
       drawScanlines();
+    } else if (game.gameState === 'wardrobe') {
+      renderWardrobe();
+      drawScanlines();
     } else if (game.gameState === 'codex') {
       renderCodex();
       drawScanlines();
@@ -4171,6 +4739,9 @@
       renderHUD();
       drawScanlines();
     }
+
+    // shared back button on every menu screen (class-select has its own below the cards)
+    if (BACK_STATES[game.gameState]) drawBackButton();
 
     // boss-death white flash, drawn on top of everything for a few frames
     if (game.whiteFlash > 0) {

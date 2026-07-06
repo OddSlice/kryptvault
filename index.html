@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.1a';
+  var GAME_VERSION = '0.2c';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -58,6 +58,41 @@
   canvas.width = W;
   canvas.height = H;
   ctx.imageSmoothingEnabled = false;
+
+  // Hidden text field for name entry. The game reads raw key events, which
+  // works on desktop but never raises a soft keyboard on mobile (and soft
+  // keyboards send no e.code anyway). Focusing this real <input> inside the
+  // tap gesture pops the mobile keyboard, and its value drives nameDraft so
+  // on-screen typing works regardless of key codes.
+  var nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.maxLength = 3;
+  nameInput.autocapitalize = 'characters';
+  nameInput.autocomplete = 'off';
+  nameInput.setAttribute('autocorrect', 'off');
+  nameInput.spellcheck = false;
+  nameInput.setAttribute('aria-hidden', 'true');
+  nameInput.tabIndex = -1;
+  // visually hidden but still focusable; 16px font stops iOS auto-zoom
+  nameInput.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;' +
+    'opacity:0.01;border:0;padding:0;margin:0;font-size:16px;background:transparent;' +
+    'color:transparent;caret-color:transparent;z-index:-1;pointer-events:none;';
+  document.body.appendChild(nameInput);
+
+  function focusNameInput() {
+    nameInput.value = nameDraft;
+    try { nameInput.focus({ preventScroll: true }); } catch (e) { nameInput.focus(); }
+  }
+  function blurNameInput() {
+    if (document.activeElement === nameInput) nameInput.blur();
+  }
+  // soft-keyboard / desktop typing into the field: mirror it into nameDraft
+  nameInput.addEventListener('input', function () {
+    if (game.gameState !== 'nameentry') return;
+    var v = (nameInput.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+    nameDraft = v;
+    nameInput.value = v;
+  });
 
   // Scale factor used to translate mouse coords into game coords.
   var scale = 1, offsetX = 0, offsetY = 0;
@@ -103,7 +138,8 @@
     skeleton:   { x: 0,  y: 128 }, // grey-blue bones
     slime:      { x: 0,  y: 144 }, // green blob
     orc:        { x: 32, y: 144 }, // red demon
-    boss:       { x: 32, y: 144 }, // red demon, drawn at 32x32
+    bossWarden:   { x: 16, y: 128 }, // plumed knight (distinct from the skeleton knight)
+    bossRevenant: { x: 16, y: 160 }, // white ghost, drawn big + translucent
     floor:      { x: 16, y: 64 },  // tan dungeon ground
     floorAlt:   { x: 32, y: 64 },  // tan variant
     wall:       { x: 16, y: 64 },  // darkened with overlay for shadow tiles
@@ -143,10 +179,15 @@
       } catch (e) { audioCtx = null; return; }
     }
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    // first user gesture unlocks audio: start the loop that fits where we are
+    if (audioCtx && !music.playing && !musicMuted) {
+      music.track = musicTrackForState();
+      startMusic();
+    }
   }
 
   function playShoot() {
-    if (!audioCtx) return;
+    if (!audioCtx || sfxMuted) return;
     var t = audioCtx.currentTime;
     var o = audioCtx.createOscillator(); o.type = 'square';
     o.frequency.setValueAtTime(880, t);
@@ -159,7 +200,7 @@
   }
 
   function playHit() {
-    if (!audioCtx) return;
+    if (!audioCtx || sfxMuted) return;
     var t = audioCtx.currentTime;
     var g = audioCtx.createGain();
     g.gain.setValueAtTime(0.4, t);
@@ -178,7 +219,7 @@
   }
 
   function playLevelUp() {
-    if (!audioCtx) return;
+    if (!audioCtx || sfxMuted) return;
     var notes = [523, 659, 784, 1047];
     var t = audioCtx.currentTime;
     for (var i = 0; i < notes.length; i++) {
@@ -194,7 +235,7 @@
   }
 
   function playPickup() {
-    if (!audioCtx) return;
+    if (!audioCtx || sfxMuted) return;
     var t = audioCtx.currentTime;
     var o = audioCtx.createOscillator(); o.type = 'square';
     o.frequency.setValueAtTime(660, t);
@@ -207,7 +248,7 @@
   }
 
   function playBossDeath() {
-    if (!audioCtx) return;
+    if (!audioCtx || sfxMuted) return;
     var t = audioCtx.currentTime;
     var len = Math.floor(audioCtx.sampleRate * 0.5);
     var buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
@@ -227,10 +268,29 @@
   // ---------------------------------------------------------------------------
   var musicMuted = false;
   try { musicMuted = localStorage.getItem('kryptvault_muted') === '1'; } catch (e) {}
+  var sfxMuted = false;
+  try { sfxMuted = localStorage.getItem('kryptvault_sfx_muted') === '1'; } catch (e) {}
 
-  var music = { playing: false, step: 0, nextTime: 0, timer: null };
-  var MUSIC_BASS = [110, 110, 131, 131, 98, 98, 123, 123];
-  var MUSIC_LEAD = [440, 0, 523, 440, 587, 523, 0, 440, 392, 0, 440, 392, 587, 0, 523, 440];
+  var music = { playing: false, step: 0, nextTime: 0, timer: null, track: 'lobby' };
+  // Two chiptune loops: the original mellow theme now lives in the lobby, and
+  // combat gets a faster minor-key loop with noise percussion so long runs
+  // feel driven instead of droning.
+  var MUSIC_TRACKS = {
+    lobby: {
+      stepDur: 0.14,
+      bass: [110, 110, 131, 131, 98, 98, 123, 123], bassType: 'triangle', bassVol: 0.09,
+      lead: [440, 0, 523, 440, 587, 523, 0, 440, 392, 0, 440, 392, 587, 0, 523, 440],
+      leadVol: 0.04,
+      drums: false
+    },
+    combat: {
+      stepDur: 0.105,
+      bass: [110, 110, 98, 110, 110, 110, 131, 147], bassType: 'sawtooth', bassVol: 0.055,
+      lead: [440, 440, 0, 523, 440, 0, 587, 523, 659, 0, 587, 523, 494, 523, 440, 0],
+      leadVol: 0.038,
+      drums: true
+    }
+  };
 
   function musicNote(freq, t, dur, type, vol) {
     var o = audioCtx.createOscillator(); o.type = type; o.frequency.value = freq;
@@ -241,14 +301,35 @@
     o.start(t); o.stop(t + dur + 0.01);
   }
 
+  // White-noise burst for the combat percussion (8-bit snare/hat).
+  function musicNoise(t, dur, vol) {
+    var len = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
+    var buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    var data = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    var src = audioCtx.createBufferSource(); src.buffer = buf;
+    var g = audioCtx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    src.connect(g); g.connect(masterGain);
+    src.start(t);
+  }
+
   function scheduleMusic() {
     if (!audioCtx || musicMuted) return;
-    var stepDur = 0.14;
+    var tr = MUSIC_TRACKS[music.track];
+    var stepDur = tr.stepDur;
     while (music.nextTime < audioCtx.currentTime + 0.3) {
       var s = music.step;
-      if (s % 2 === 0) musicNote(MUSIC_BASS[(s / 2) % 8 | 0], music.nextTime, stepDur * 1.8, 'triangle', 0.09);
-      var lead = MUSIC_LEAD[s % 16];
-      if (lead) musicNote(lead, music.nextTime, stepDur * 0.8, 'square', 0.04);
+      if (s % 2 === 0) musicNote(tr.bass[(s / 2) % tr.bass.length | 0], music.nextTime, stepDur * 1.8, tr.bassType, tr.bassVol);
+      var lead = tr.lead[s % tr.lead.length];
+      if (lead) musicNote(lead, music.nextTime, stepDur * 0.8, 'square', tr.leadVol);
+      if (tr.drums) {
+        var ds = s % 8;
+        if (ds === 0) musicNote(55, music.nextTime, stepDur * 0.9, 'square', 0.07); // kick thump
+        if (ds === 4) musicNoise(music.nextTime, 0.05, 0.05);                       // snare
+        if (ds === 6) musicNoise(music.nextTime, 0.02, 0.02);                       // hat tick
+      }
       music.nextTime += stepDur;
       music.step++;
     }
@@ -268,12 +349,39 @@
     music.playing = false;
   }
 
+  // Switch loops (lobby <-> combat); restarts the scheduler on a track change.
+  function setMusicTrack(name) {
+    if (music.track === name && music.playing) return;
+    music.track = name;
+    stopMusic();
+    startMusic();
+  }
+
+  function musicTrackForState() {
+    var s = game.gameState;
+    return (s === 'playing' || s === 'waveintro' || s === 'levelup' || s === 'paused')
+      ? 'combat' : 'lobby';
+  }
+
   function toggleMute() {
     musicMuted = !musicMuted;
     try { localStorage.setItem('kryptvault_muted', musicMuted ? '1' : '0'); } catch (e) {}
     if (musicMuted) stopMusic();
-    else if (game.gameState === 'playing' || game.gameState === 'waveintro' ||
-             game.gameState === 'levelup' || game.gameState === 'paused') startMusic();
+    else { music.track = musicTrackForState(); startMusic(); }
+  }
+
+  // separate switch for sound effects (players asked for a music-only mode
+  // and a fully silent mode)
+  function toggleSfx() {
+    sfxMuted = !sfxMuted;
+    try { localStorage.setItem('kryptvault_sfx_muted', sfxMuted ? '1' : '0'); } catch (e) {}
+  }
+
+  // in-game speaker button: one tap silences (or restores) music AND sfx
+  function toggleAllSound() {
+    var mute = !(musicMuted && sfxMuted);
+    if (musicMuted !== mute) toggleMute();
+    if (sfxMuted !== mute) toggleSfx();
   }
 
   // ---------------------------------------------------------------------------
@@ -286,14 +394,19 @@
     ensureAudio();
     keys[e.code] = true;
     if (game.gameState === 'nameentry') {
-      if (/^Key[A-Z]$/.test(e.code) && nameDraft.length < 3) {
-        nameDraft += e.code.slice(3);
-      } else if (e.code === 'Backspace') {
-        nameDraft = nameDraft.slice(0, -1);
-        e.preventDefault();
-      } else if (e.code === 'Escape') {
+      if (e.code === 'Escape') {
         pendingMode = 'normal';
         game.gameState = 'title';
+        blurNameInput();
+      } else if (document.activeElement !== nameInput) {
+        // fallback for when the hidden input isn't handling keys; when it IS
+        // focused, its 'input' event is the single source of truth (no dupes)
+        if (/^Key[A-Z]$/.test(e.code) && nameDraft.length < 3) {
+          nameDraft += e.code.slice(3);
+        } else if (e.code === 'Backspace') {
+          nameDraft = nameDraft.slice(0, -1);
+          e.preventDefault();
+        }
       }
     } else if (game.gameState === 'login') {
       var pos = loginForm.buf.length;
@@ -311,7 +424,7 @@
         game.gameState = 'account';
       }
     } else if (game.gameState === 'account') {
-      if (e.code === 'Digit1') { nameDraft = ''; afterName = 'title'; game.gameState = 'nameentry'; }
+      if (e.code === 'Digit1') { enterNameEntry('title'); }
       else if (e.code === 'Digit2') { loginForm.buf = ''; loginForm.state = 'idle'; game.gameState = 'login'; }
       else if (e.code === 'Escape') { game.gameState = 'title'; }
     } else if (game.gameState === 'codex') {
@@ -320,6 +433,7 @@
       if (e.code === 'Escape') { game.gameState = 'title'; maybeRefreshLeaderboard(); }
     } else if (game.gameState === 'title') {
       if (e.code === 'KeyN') { game.gameState = 'account'; }
+      else if (e.code === 'KeyT') { game.gameState = 'settings'; }
       else if (e.code === 'KeyR') { game.gameState = 'codex'; }
       else if (e.code === 'KeyS') { game.gameState = 'shop'; }
       else if (e.code === 'KeyA') { game.gameState = 'achievements'; }
@@ -340,8 +454,12 @@
       if (e.code === 'Escape' || e.code === 'KeyS') game.gameState = 'title';
     } else if (game.gameState === 'achievements') {
       if (e.code === 'Escape' || e.code === 'KeyA') game.gameState = 'title';
+    } else if (game.gameState === 'settings') {
+      if (e.code === 'Escape' || e.code === 'KeyT') game.gameState = 'title';
+      else if (e.code === 'KeyN') game.gameState = 'account';
     }
     if (e.code === 'KeyM' && game.gameState !== 'nameentry' && game.gameState !== 'login') toggleMute();
+    if (e.code === 'KeyF' && game.gameState !== 'nameentry' && game.gameState !== 'login') toggleSfx();
     if (e.code === 'Enter') handleConfirm();
     if (e.code === 'KeyP' || e.code === 'Escape') {
       if (game.gameState === 'playing') game.gameState = 'paused';
@@ -454,11 +572,23 @@
     } else if (game.gameState === 'gameover' || game.gameState === 'nameentry' ||
                game.gameState === 'accountinfo' || game.gameState === 'login') {
       handleConfirm();
+    } else if (game.gameState === 'settings') {
+      var sbtns = settingsButtons();
+      for (var sb = 0; sb < sbtns.length; sb++) {
+        var sbtn = sbtns[sb];
+        if (p.x >= sbtn.x && p.x <= sbtn.x + sbtn.w && p.y >= sbtn.y && p.y <= sbtn.y + sbtn.h) {
+          if (sbtn.id === 'name') game.gameState = 'account';
+          else if (sbtn.id === 'music') toggleMute();
+          else if (sbtn.id === 'sfx') toggleSfx();
+          return;
+        }
+      }
+      game.gameState = 'title';
     } else if (game.gameState === 'account') {
       for (var ab = 0; ab < ACCOUNT_BTNS.length; ab++) {
         var abtn = ACCOUNT_BTNS[ab];
         if (p.x >= abtn.x && p.x <= abtn.x + abtn.w && p.y >= abtn.y && p.y <= abtn.y + abtn.h) {
-          if (abtn.id === 'newacct') { nameDraft = ''; afterName = 'title'; game.gameState = 'nameentry'; }
+          if (abtn.id === 'newacct') { enterNameEntry('title'); }
           else { loginForm.buf = ''; loginForm.state = 'idle'; game.gameState = 'login'; }
           return;
         }
@@ -472,9 +602,12 @@
       // pause button hit-box (top-right, under the kill counter)
       if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 18 && p.y <= 38) {
         game.gameState = 'paused';
+      } else if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 40 && p.y <= 60) {
+        toggleAllSound();
       }
     } else if (game.gameState === 'paused') {
-      game.gameState = 'playing';
+      if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 40 && p.y <= 60) toggleAllSound();
+      else game.gameState = 'playing';
     } else if (game.gameState === 'shop') {
       var bought = false;
       for (var sr = 0; sr < SHOP_ITEMS.length; sr++) {
@@ -516,6 +649,14 @@
   var afterName = 'play';     // where to go once the name/account step is done
   var pendingMode = 'normal'; // 'daily' when started via the daily challenge key
 
+  // Enter the initials screen from a user gesture, raising the mobile keyboard.
+  function enterNameEntry(after) {
+    nameDraft = '';
+    afterName = after;
+    game.gameState = 'nameentry';
+    focusNameInput();
+  }
+
   function finishNameStep() {
     if (afterName === 'play') enterClassSelect();
     else game.gameState = 'title';
@@ -523,7 +664,8 @@
 
   function handleConfirm() {
     if (game.gameState === 'shop' || game.gameState === 'achievements' ||
-        game.gameState === 'account' || game.gameState === 'codex') {
+        game.gameState === 'account' || game.gameState === 'codex' ||
+        game.gameState === 'settings') {
       game.gameState = 'title';
       return;
     }
@@ -575,6 +717,24 @@
   // STATIC DUNGEON FLOOR (seeded once so it doesn't shimmer)
   // ---------------------------------------------------------------------------
   var TILE_SIZE = 16;
+
+  // Biomes rotate every 10 waves (post-boss): palette swaps for floor + walls.
+  // Design rule: floors stay mid-dark and desaturated so enemy contrast never
+  // suffers — tints are low-alpha overlays, never bright fills.
+  var BIOMES = [
+    { name: 'THE CATACOMBS', tint: null,                      speck: null,           texture: 'brick',
+      wallFill: '#334455', wallAlt: '#36475a', wallBorder: '#556677', wallShadow: '#223344' },
+    { name: 'THE DUNES',     tint: 'rgba(210,140,30,0.14)',   speck: '#8a6a3a',      texture: 'strata',
+      wallFill: '#5d4a2e', wallAlt: '#66512f', wallBorder: '#8a734a', wallShadow: '#3e3220' },
+    { name: 'THE FROST DEPTHS', tint: 'rgba(90,150,255,0.16)', speck: '#cfe8ff',     texture: 'ice',
+      wallFill: '#2e4a63', wallAlt: '#325371', wallBorder: '#5d89a8', wallShadow: '#1e3242' },
+    { name: 'THE INFERNO',   tint: 'rgba(200,30,10,0.14)',    speck: '#ff5a1c',      texture: 'ember',
+      wallFill: '#3a2626', wallAlt: '#402a28', wallBorder: '#7a4033', wallShadow: '#241414' }
+  ];
+  function currentBiome() {
+    return BIOMES[Math.floor((game.wave - 1) / 10) % BIOMES.length];
+  }
+
   var floorTiles = [];
   function buildFloor() {
     floorTiles = [];
@@ -1221,7 +1381,7 @@
     pl.xpMult *= (1 + 0.1 * shop.wis);
     buildFloor();
     beginWave(1);
-    startMusic();
+    setMusicTrack('combat');
   }
 
   // Set up a wave. Wave 1 gets the frozen 2-second intro card; later waves
@@ -1233,7 +1393,7 @@
     if (n >= 5) unlockAch('wave_5');
     if (n >= 10) unlockAch('wave_10');
     game.wave = n;
-    game.bossWave = (n % 5 === 0);
+    game.bossWave = (n % 10 === 0); // bosses are biome finales (10/20/30...)
     game.boss = null;
     game.waveKills = 0;
     game.waveTarget = game.bossWave ? 1 : (15 + n * 5);
@@ -1359,26 +1519,40 @@
   }
 
   // Spawn a single boss from the top-centre of the canvas. Three kinds rotate
-  // by boss number: charger (dashes), summoner (spawns minions), spiral
-  // (bullet rings).
+  // by boss number, each with its own name, sprite, size and signature move:
+  //   charger  → THE WARDEN      (plumed knight; the dash ends in a radial slam)
+  //   summoner → THE NECROMANCER (robed lich; alternates summons and soul volleys)
+  //   spiral   → THE REVENANT    (giant ghost; phases walls, blinks to the player)
   var BOSS_KINDS = ['charger', 'summoner', 'spiral'];
+  var BOSS_DEFS = {
+    charger:  { name: 'THE WARDEN',      color: '#ffd700', tile: TILE.bossWarden,   size: 26, draw: 30, speed: 22 },
+    summoner: { name: 'THE NECROMANCER', color: '#b06ce8', tile: null,              size: 30, draw: 36, speed: 28 },
+    spiral:   { name: 'THE REVENANT',    color: '#7fe8dd', tile: TILE.bossRevenant, size: 24, draw: 32, speed: 30, ghost: true }
+  };
 
   function spawnBoss() {
-    var kind = BOSS_KINDS[(Math.round(game.wave / 5) - 1 + 300) % 3];
-    var hp = Math.round((600 + game.wave * 80) * game.curseHpMult);
+    var kind = BOSS_KINDS[(Math.round(game.wave / 10) - 1 + 300) % 3];
+    var def = BOSS_DEFS[kind];
+    // 1.3x: biome-finale bosses hit the end of a 10-wave arc, so they get a
+    // little extra bulk over the old every-5 cadence
+    var hp = Math.round((600 + game.wave * 80) * 1.3 * game.curseHpMult);
     var boss = {
       type: 'boss', isBoss: true, kind: kind, uid: game.enemyUid++,
+      name: def.name, drawSize: def.draw, ghost: !!def.ghost,
       x: W / 2, y: -20,
-      w: 28, h: 28,
+      w: def.size, h: def.size,
       hp: hp, maxHp: hp,
-      color: kind === 'summoner' ? '#9b59b6' : (kind === 'spiral' ? '#2ec4b6' : '#e84537'),
-      tile: TILE.boss,
-      speed: kind === 'charger' ? 22 : 28,
+      color: def.color,
+      tile: def.tile,
+      speed: def.speed,
       contact: 25,
       aiTimer: 3,          // time until next special (dash/summon/ring)
       dashTimer: 0,        // charger: remaining dash time
       dashVx: 0, dashVy: 0,
       telegraph: 0,        // charger: wind-up before the dash
+      blinkTimer: 6,       // revenant: time until the next blink
+      blinkPhase: 0,       // revenant: fading out pre-teleport while > 0
+      volley: false,       // necromancer: alternates soul volley / summons
       kx: 0, ky: 0,
       hitFlash: 0,
       animPhase: 0
@@ -1849,6 +2023,14 @@
             if (!boxHitsWall(dnx, dny, e.w, e.h)) { e.x = dnx; e.y = dny; }
             else e.dashTimer = 0; // slams into a wall
             chase = 0;
+            if (e.dashTimer <= 0) {
+              // signature: every dash ends in a radial shield slam
+              for (var sl = 0; sl < 8; sl++) {
+                var sla = (Math.PI * 2 / 8) * sl + Math.PI / 8;
+                game.enemyShots.push({ x: e.x, y: e.y, vx: Math.cos(sla) * 95, vy: Math.sin(sla) * 95 });
+              }
+              game.shakeTimer = 0.3;
+            }
           } else if (e.telegraph > 0) {
             e.telegraph -= dt;
             chase = 0;
@@ -1865,12 +2047,26 @@
         } else if (e.kind === 'summoner') {
           if (ed < 130) chase = -e.speed;          // keeps its distance
           else if (ed < 170) chase = 0;
-          if (e.aiTimer <= 0 && game.enemies.length < 195) {
+          if (e.aiTimer <= 0) {
             e.aiTimer = 4;
-            for (var sm = 0; sm < 3; sm++) {
-              spawnEnemyAt(enemyTypeForWave(game.wave), e.x + rand(-20, 20), e.y + rand(-20, 20));
+            e.volley = !e.volley;
+            if (e.volley) {
+              // signature: aimed three-bolt soul volley between summons
+              var va = Math.atan2(edy, edx);
+              for (var vb = -1; vb <= 1; vb++) {
+                game.enemyShots.push({
+                  x: e.x, y: e.y,
+                  vx: Math.cos(va + vb * 0.22) * 115,
+                  vy: Math.sin(va + vb * 0.22) * 115
+                });
+              }
+              spawnFloatText(e.x, e.y - 18, 'PERISH!', '#b06ce8');
+            } else if (game.enemies.length < 195) {
+              for (var sm = 0; sm < 3; sm++) {
+                spawnEnemyAt(enemyTypeForWave(game.wave), e.x + rand(-20, 20), e.y + rand(-20, 20));
+              }
+              spawnFloatText(e.x, e.y - 18, 'RISE!', '#b06ce8');
             }
-            spawnFloatText(e.x, e.y - 18, 'RISE!', '#9b59b6');
           }
         } else if (e.kind === 'spiral') {
           if (e.aiTimer <= 0) {
@@ -1880,6 +2076,21 @@
               game.enemyShots.push({ x: e.x, y: e.y, vx: Math.cos(spa) * 80, vy: Math.sin(spa) * 80 });
             }
           }
+          // signature: blink — fades out, then reappears beside the player
+          if (e.blinkPhase > 0) {
+            e.blinkPhase -= dt;
+            chase = 0;
+            if (e.blinkPhase <= 0) {
+              var ba = rand(0, Math.PI * 2);
+              e.x = clamp(p.x + Math.cos(ba) * 75, 20, W - 20);
+              e.y = clamp(p.y + Math.sin(ba) * 75, 20, H - 20);
+              pushOutOfWalls(e); // ghost, but never rematerialise inside a wall
+              spawnDeathParticles(e.x, e.y, e.color);
+            }
+          } else {
+            e.blinkTimer -= dt;
+            if (e.blinkTimer <= 0) { e.blinkTimer = 6; e.blinkPhase = 0.7; }
+          }
         }
       }
 
@@ -1888,7 +2099,7 @@
       var mvy = (edy / ed) * chase * slowF + e.ky;
       e.kx *= 0.85; e.ky *= 0.85;
 
-      var ghost = (e.type === 'wraith'); // wraiths drift straight through walls
+      var ghost = (e.type === 'wraith' || e.ghost); // wraiths + THE REVENANT drift straight through walls
       if (!ghost) {
         // soft repulsion away from any wall within 20px — steering-based
         // avoidance so enemies flow around corners (no pathfinding)
@@ -2192,6 +2403,7 @@
 
   function killBoss(index, en) {
     bossExplosion(en.x, en.y);
+    if (en.name) spawnFloatText(en.x, en.y - 22, en.name + ' SLAIN', en.color);
     playBossDeath();
     unlockAch('boss_slayer');
     game.coinsEarned += 25 * (1 + 0.25 * runData.shop.frt) * game.player.coinMult;
@@ -2254,7 +2466,7 @@
     if (runData.coins >= 500) unlockAch('moneybags');
     saveRunData();
     submitScore();
-    stopMusic();
+    setMusicTrack('lobby'); // back to the mellow menu loop
   }
 
   // ---------------------------------------------------------------------------
@@ -2282,6 +2494,7 @@
   // ---------------------------------------------------------------------------
   function drawFloor() {
     var useSheet = !useProceduralSprites && sheetReady;
+    var B = currentBiome();
     for (var i = 0; i < floorTiles.length; i++) {
       var t = floorTiles[i];
       if (useSheet) {
@@ -2303,29 +2516,88 @@
         ctx.fillRect(t.x, t.y, 1, TILE_SIZE);
       }
     }
+    // biome palette wash over the whole floor (walls draw on top, unaffected)
+    if (B.tint) {
+      ctx.fillStyle = B.tint;
+      ctx.fillRect(0, 0, W, H);
+    }
+    // sparse biome texture specks (embers/ice glints/pebbles), deterministic
+    // per tile so they don't shimmer frame to frame
+    if (B.speck) {
+      ctx.fillStyle = B.speck;
+      for (var s = 0; s < floorTiles.length; s++) {
+        var ft = floorTiles[s];
+        if (ft.shade % 6 === 0 && ft.variant === 0) {
+          ctx.fillRect(ft.x + (ft.shade % 13), ft.y + (ft.shade % 11), 2, 2);
+        }
+      }
+    }
   }
 
   function drawWalls() {
     // NOTE: the sheet tile at (0,144) is the slime sprite in this packing, so
     // walls always use the boxy procedural style to stay visually distinct.
+    var B = currentBiome();
     for (var i = 0; i < walls.length; i++) {
       var wl = walls[i];
-      ctx.fillStyle = wl.tileVariant === 1 ? '#36475a' : '#334455';
+      ctx.fillStyle = wl.tileVariant === 1 ? B.wallAlt : B.wallFill;
       ctx.fillRect(wl.x, wl.y, wl.w, wl.h);
       // 1px border
-      ctx.fillStyle = '#556677';
+      ctx.fillStyle = B.wallBorder;
       ctx.fillRect(wl.x, wl.y, wl.w, 1);
       ctx.fillRect(wl.x, wl.y + wl.h - 1, wl.w, 1);
       ctx.fillRect(wl.x, wl.y, 1, wl.h);
       ctx.fillRect(wl.x + wl.w - 1, wl.y, 1, wl.h);
       // inner shadow along top/left for 8-bit depth
-      ctx.fillStyle = '#223344';
+      ctx.fillStyle = B.wallShadow;
       ctx.fillRect(wl.x + 1, wl.y + 1, wl.w - 2, 1);
       ctx.fillRect(wl.x + 1, wl.y + 1, 1, wl.h - 2);
-      // 16px seams so big chunks read as tiled blocks
-      ctx.fillStyle = 'rgba(0,0,0,0.15)';
-      for (var sx2 = 16; sx2 < wl.w; sx2 += 16) ctx.fillRect(wl.x + sx2, wl.y, 1, wl.h);
-      for (var sy2 = 16; sy2 < wl.h; sy2 += 16) ctx.fillRect(wl.x, wl.y + sy2, wl.w, 1);
+      // per-biome texture pass (details are deterministic per 16px cell so
+      // nothing shimmers frame to frame; only inferno veins animate)
+      if (B.texture === 'strata') {
+        // horizontal sandstone strata instead of block seams
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';
+        for (var st = 6; st < wl.h; st += 6) ctx.fillRect(wl.x + 1, wl.y + st, wl.w - 2, 1);
+      } else if (B.texture === 'ice') {
+        // faint seams + diagonal cracks + white glints
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        for (var ix = 16; ix < wl.w; ix += 16) ctx.fillRect(wl.x + ix, wl.y, 1, wl.h);
+        for (var iy = 16; iy < wl.h; iy += 16) ctx.fillRect(wl.x, wl.y + iy, wl.w, 1);
+        for (var cy2 = 0; cy2 + 16 <= wl.h; cy2 += 16) {
+          for (var cx2 = 0; cx2 + 16 <= wl.w; cx2 += 16) {
+            var ih = ((wl.x + cx2) * 7 + (wl.y + cy2) * 13) % 5;
+            if (ih === 0) {
+              ctx.fillStyle = 'rgba(220,240,255,0.35)';
+              for (var dstep = 0; dstep < 4; dstep++) {
+                ctx.fillRect(wl.x + cx2 + 4 + dstep * 2, wl.y + cy2 + 4 + dstep * 2, 2, 1);
+              }
+            } else if (ih === 2) {
+              ctx.fillStyle = 'rgba(255,255,255,0.5)';
+              ctx.fillRect(wl.x + cx2 + 10, wl.y + cy2 + 6, 2, 2);
+            }
+          }
+        }
+      } else if (B.texture === 'ember') {
+        // deep seams + slowly pulsing molten veins
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        for (var ex = 16; ex < wl.w; ex += 16) ctx.fillRect(wl.x + ex, wl.y, 1, wl.h);
+        for (var ey = 16; ey < wl.h; ey += 16) ctx.fillRect(wl.x, wl.y + ey, wl.w, 1);
+        for (var vy = 0; vy + 16 <= wl.h; vy += 16) {
+          for (var vx = 0; vx + 16 <= wl.w; vx += 16) {
+            if (((wl.x + vx) * 7 + (wl.y + vy) * 13) % 3 === 1) {
+              var glow = 0.65 + 0.3 * Math.sin(game.time * 3 + vx + vy);
+              ctx.fillStyle = 'rgba(255,100,30,' + glow.toFixed(2) + ')';
+              ctx.fillRect(wl.x + vx + 3, wl.y + vy + 9, 7, 2);
+              ctx.fillRect(wl.x + vx + 8, wl.y + vy + 5, 2, 4);
+            }
+          }
+        }
+      } else {
+        // catacombs brick: 16px seams so big chunks read as tiled blocks
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        for (var sx2 = 16; sx2 < wl.w; sx2 += 16) ctx.fillRect(wl.x + sx2, wl.y, 1, wl.h);
+        for (var sy2 = 16; sy2 < wl.h; sy2 += 16) ctx.fillRect(wl.x, wl.y + sy2, wl.w, 1);
+      }
     }
   }
 
@@ -2585,8 +2857,8 @@
   }
 
   function drawBoss(e) {
-    // pulse between 30 and 34px on a 1-second sine cycle
-    var ds = 32 + Math.sin(game.time * Math.PI * 2) * 2;
+    // pulse ±2px around the kind's own size on a 1-second sine cycle
+    var ds = (e.drawSize || 32) + Math.sin(game.time * Math.PI * 2) * 2;
     var dsr = Math.round(ds);
     var bx = Math.round(e.x - dsr / 2);
     var by = Math.round(e.y - dsr / 2);
@@ -2599,6 +2871,16 @@
     // charger telegraph: violent white flashing + shake before the dash
     var tg = e.telegraph > 0 && Math.floor(e.telegraph * 12) % 2 === 0;
     if (e.telegraph > 0) { bx += randInt(-2, 2); by += randInt(-2, 2); }
+    if (e.kind === 'summoner') {
+      drawNecromancer(e, bx, by, dsr, tg);
+      return;
+    }
+    if (e.kind === 'spiral') {
+      // spectral: translucent, and fades right out while winding up a blink
+      var ga = 0.62 + 0.18 * Math.sin(game.time * 5);
+      if (e.blinkPhase > 0) ga *= clamp(e.blinkPhase / 0.7, 0.15, 1);
+      ctx.globalAlpha = ga;
+    }
     var drew = drawTile(e.tile, bx, by, dsr, dsr, false);
     if (drew) {
       if (e.hitFlash > 0 || tg) {
@@ -2612,7 +2894,35 @@
       ctx.fillRect(bx + 6, by + 8, 4, 4);
       ctx.fillRect(bx + dsr - 10, by + 8, 4, 4);
     }
+    ctx.globalAlpha = 1;
     // boss uses the big dedicated HUD bar, so no small bar here.
+  }
+
+  // THE NECROMANCER has no matching tile on the sheet, so it is drawn
+  // procedurally (same style family as the cultist, scaled up): tattered
+  // purple robe, hooded skull face, glowing green eyes, soul-orb staff.
+  function drawNecromancer(e, bx, by, dsr, tg) {
+    var u = dsr / 16; // one logical pixel on a 16px design grid
+    var flash = e.hitFlash > 0 || tg;
+    function px(x, y, w, h, col) {
+      ctx.fillStyle = flash && col !== '#59ff8e' ? '#ffffff' : col;
+      ctx.fillRect(Math.round(bx + x * u), Math.round(by + y * u), Math.ceil(w * u), Math.ceil(h * u));
+    }
+    // tattered robe (jagged hem)
+    px(3, 6, 10, 8, '#3a1f5e');
+    px(2, 13, 3, 3, '#3a1f5e'); px(7, 14, 3, 2, '#3a1f5e'); px(11, 13, 3, 3, '#3a1f5e');
+    // hood
+    px(4, 2, 8, 3, '#5b2c8e');
+    px(3, 4, 10, 3, '#5b2c8e');
+    // skull face inside the hood shadow
+    px(5, 4.5, 6, 3.5, '#e8e0d0');
+    // glowing green eyes
+    px(6, 5, 1.5, 1.5, '#59ff8e');
+    px(8.5, 5, 1.5, 1.5, '#59ff8e');
+    // staff with a flickering soul-orb
+    px(13.5, 3, 1, 12, '#7a5a30');
+    px(12.75, 1.5, 2.5, 2.5, '#59ff8e');
+    if (game.time % 1 < 0.5) px(13.25, 2, 1.5, 1.5, '#b6ffce');
   }
 
   function drawOrbs() {
@@ -2630,6 +2940,10 @@
   function drawProjectiles() {
     for (var i = 0; i < game.projectiles.length; i++) {
       var pr = game.projectiles[i];
+      // class identity: rogues throw daggers, warriors spinning axes,
+      // the mage keeps his glowing orbs
+      if (currentClass === 'rogue') { drawDagger(pr); continue; }
+      if (currentClass === 'warrior') { drawAxe(pr); continue; }
       // glow
       ctx.fillStyle = 'rgba(255,230,0,0.3)';
       ctx.fillRect(Math.round(pr.x - 3), Math.round(pr.y - 3), 6, 6);
@@ -2645,6 +2959,46 @@
       ctx.fillStyle = '#ff44aa';
       ctx.fillRect(Math.round(sh.x - 2), Math.round(sh.y - 2), 4, 4);
     }
+  }
+
+  // Rogue dagger: slim steel blade pointing along its flight direction,
+  // dark-outlined to match the Tiny Dungeon sprite style.
+  function drawDagger(pr) {
+    ctx.save();
+    ctx.translate(Math.round(pr.x), Math.round(pr.y));
+    ctx.rotate(Math.atan2(pr.vy, pr.vx) + Math.PI / 2); // art points up
+    ctx.fillStyle = '#2a2135';    // outline silhouette
+    ctx.fillRect(-2, -6, 4, 8);
+    ctx.fillRect(-3, 0, 6, 2);
+    ctx.fillStyle = '#b8c4d4';
+    ctx.fillRect(-1, -5, 2, 6);   // blade
+    ctx.fillStyle = '#e8eef8';
+    ctx.fillRect(-1, -5, 1, 3);   // edge shine
+    ctx.fillStyle = '#8a6a3a';
+    ctx.fillRect(-2, 0, 4, 1);    // crossguard
+    ctx.fillStyle = '#6b4a2a';
+    ctx.fillRect(-1, 1, 2, 3);    // grip
+    ctx.restore();
+  }
+
+  // Warrior axe: twin-bladed, dark-outlined, spinning as it flies.
+  function drawAxe(pr) {
+    ctx.save();
+    ctx.translate(Math.round(pr.x), Math.round(pr.y));
+    ctx.rotate(Math.atan2(pr.vy, pr.vx) + game.time * 14);
+    ctx.fillStyle = '#2a2135';    // outline silhouette
+    ctx.fillRect(-6, -6, 5, 8);
+    ctx.fillRect(1, -6, 5, 8);
+    ctx.fillRect(-2, -6, 4, 12);
+    ctx.fillStyle = '#7a5a30';
+    ctx.fillRect(-1, -5, 2, 10);  // haft
+    ctx.fillStyle = '#b8c4d4';
+    ctx.fillRect(-5, -5, 3, 6);   // left blade
+    ctx.fillRect(2, -5, 3, 6);    // right blade
+    ctx.fillStyle = '#e8eef8';
+    ctx.fillRect(-5, -5, 1, 6);   // edge shine
+    ctx.fillRect(4, -5, 1, 6);
+    ctx.restore();
   }
 
   function drawParticles() {
@@ -2744,7 +3098,10 @@
     if (game.waveBanner > 0) {
       ctx.globalAlpha = Math.min(1, game.waveBanner / 0.6);
       text('WAVE ' + pad(game.wave, 2), W / 2, 44, 16, '#FFD700', 'center');
-      if (game.bossWave) {
+      if (game.bossWave && game.boss) {
+        // name reveal in the boss's own colour
+        text(game.boss.name, W / 2, 66, 10, game.boss.color, 'center');
+      } else if (game.bossWave) {
         text('! BOSS !', W / 2, 66, 8, '#ff2d2d', 'center');
       }
       ctx.globalAlpha = 1;
@@ -2777,6 +3134,35 @@
     ctx.fillRect(W - 18, 23, 3, 10);
     ctx.fillRect(W - 13, 23, 3, 10);
 
+    // ----- sound button (below pause; crossed speaker = everything muted) -----
+    var sndMuted = musicMuted && sfxMuted;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(W - 23, 41, 18, 18);
+    ctx.fillStyle = '#888888';
+    ctx.fillRect(W - 23, 41, 18, 1);
+    ctx.fillRect(W - 23, 58, 18, 1);
+    ctx.fillRect(W - 23, 41, 1, 18);
+    ctx.fillRect(W - 6, 41, 1, 18);
+    // speaker: box + stepped cone
+    ctx.fillStyle = sndMuted ? '#777777' : '#cccccc';
+    ctx.fillRect(W - 20, 47, 3, 6);
+    ctx.fillRect(W - 17, 45, 2, 10);
+    ctx.fillRect(W - 15, 43, 2, 14);
+    if (sndMuted) {
+      // red slash across the speaker
+      ctx.fillStyle = '#ff2d2d';
+      for (var sl2 = 0; sl2 < 12; sl2++) {
+        ctx.fillRect(W - 21 + sl2, 43 + sl2, 2, 2);
+      }
+    } else {
+      // little sound waves
+      ctx.fillStyle = '#cccccc';
+      ctx.fillRect(W - 11, 46, 1, 2);
+      ctx.fillRect(W - 11, 52, 1, 2);
+      ctx.fillRect(W - 9, 44, 1, 3);
+      ctx.fillRect(W - 9, 53, 1, 3);
+    }
+
     // ----- XP bar (bottom-left, full width) -----
     text('LVL ' + pad(game.level, 2), 6, H - 24, 6, '#ffffff');
     var barX = 6, barY = H - 14, barW = W - 12, barH = 8;
@@ -2806,7 +3192,7 @@
     // ----- boss health bar (only while a boss is alive) -----
     if (game.bossWave && game.boss) {
       var bw = 200, bh = 10, bx = (W - bw) / 2, by = 24;
-      text('BOSS', bx - 4, by + 2, 6, '#ff2d2d', 'right');
+      text(game.boss.name || 'BOSS', bx - 4, by + 2, 6, game.boss.color, 'right');
       ctx.fillStyle = '#FFD700';                 // 1px gold border
       ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
       ctx.fillStyle = '#3a0000';                 // dark red bg
@@ -2864,19 +3250,27 @@
     var unlocked = 0;
     for (var i = 0; i < ACHIEVEMENTS.length; i++) if (runData.achievements[ACHIEVEMENTS[i].id]) unlocked++;
     return [
-      { id: 'play',   label: 'PLAY',                                          hint: 'ENTER', x: 24, y: 80,  w: 172, h: 28, big: true },
-      { id: 'shop',   label: 'THE VAULT: UPGRADES ' + Math.round(runData.coins) + 'c', hint: 'S', x: 24, y: 116, w: 172, h: 20 },
-      { id: 'awards', label: 'AWARDS — ' + unlocked + '/' + ACHIEVEMENTS.length, hint: 'A', x: 24, y: 142, w: 172, h: 20 },
-      { id: 'codex',  label: 'RECIPE CODEX',                                  hint: 'R', x: 24, y: 168, w: 172, h: 20 },
-      { id: 'name',   label: runData.playerDisc ? playerTag() : 'NAME: ' + (runData.name || '---'), hint: 'N', x: 24, y: 198, w: 83, h: 18 },
-      { id: 'mute',   label: musicMuted ? 'SND: OFF' : 'SND: ON',             hint: 'M', x: 113, y: 198, w: 83, h: 18 }
+      { id: 'play',     label: 'PLAY',                                          hint: 'ENTER', x: 24, y: 80,  w: 172, h: 42, big: true },
+      { id: 'shop',     label: 'THE VAULT: UPGRADES ' + Math.round(runData.coins) + 'c', hint: 'S', x: 24, y: 130, w: 172, h: 22 },
+      { id: 'awards',   label: 'AWARDS — ' + unlocked + '/' + ACHIEVEMENTS.length, hint: 'A', x: 24, y: 158, w: 172, h: 22 },
+      { id: 'codex',    label: 'RECIPE CODEX',                                  hint: 'R', x: 24, y: 186, w: 172, h: 22 },
+      { id: 'settings', label: 'SETTINGS',                                      hint: 'T', x: 24, y: 214, w: 172, h: 22 }
+    ];
+  }
+
+  // settings screen: account + audio toggles in one place
+  function settingsButtons() {
+    return [
+      { id: 'name',  label: runData.playerDisc ? 'ACCOUNT: ' + playerTag() : 'NAME: ' + (runData.name || '---'), hint: 'N', x: 140, y: 108, w: 200, h: 22 },
+      { id: 'music', label: musicMuted ? 'MUSIC: OFF' : 'MUSIC: ON', hint: 'M', x: 140, y: 138, w: 200, h: 22 },
+      { id: 'sfx',   label: sfxMuted ? 'SFX: OFF' : 'SFX: ON',       hint: 'F', x: 140, y: 168, w: 200, h: 22 }
     ];
   }
 
   function startModeGate(mode) {
     pendingMode = mode;
     if (runData.name && runData.name.length === 3) enterClassSelect();
-    else { nameDraft = ''; afterName = 'play'; game.gameState = 'nameentry'; }
+    else { enterNameEntry('play'); }
   }
 
   function titleButtonAction(id) {
@@ -2888,15 +3282,13 @@
       game.gameState = 'achievements';
     } else if (id === 'codex') {
       game.gameState = 'codex';
-    } else if (id === 'name') {
-      game.gameState = 'account';
-    } else if (id === 'mute') {
-      toggleMute();
+    } else if (id === 'settings') {
+      game.gameState = 'settings';
     }
   }
 
   // leaderboard panel geometry (also used for click handling)
-  var LB_PANEL = { x: 210, y: 80, w: 246, h: 160 };
+  var LB_PANEL = { x: 210, y: 80, w: 246, h: 156 };
 
   function fmtKills(k) {
     if (k >= 1000) {
@@ -2984,7 +3376,7 @@
         var me = row.name === runData.name &&
                  (!runData.playerDisc || !row.disc || row.disc === runData.playerDisc);
         var tag = row.name + (row.disc ? '#' + row.disc : '');
-        var rowY = ly + r * 11;
+        var rowY = ly + r * 12; // 12px rows fill the panel with no dead strip
         text(pad(r + 1, 2), LB_PANEL.x + 8, rowY, 6, me ? '#FFD700' : '#555566');
         // class shown as the hero sprite (fallback: class-coloured square)
         if (!drawTile(classDef(row.cls).tile, LB_PANEL.x + 24, rowY - 2, 9, 9, false)) {
@@ -3003,6 +3395,26 @@
     }
     text('WASD MOVE — AUTO-FIRE — P PAUSE', W / 2, 259, 6, '#555555', 'center');
     text('v' + GAME_VERSION, 6, 258, 6, '#555566');
+  }
+
+  function renderSettings() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    drawAnimatedScanlines(0.05);
+    text('SETTINGS', W / 2, 40, 16, '#FFD700', 'center');
+    text('NAME, MUSIC & SOUND EFFECTS', W / 2, 66, 6, '#888888', 'center');
+    var btns = settingsButtons();
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i];
+      var hover = mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h;
+      ctx.fillStyle = hover ? '#FFD700' : '#444466';
+      ctx.fillRect(b.x - 1, b.y - 1, b.w + 2, b.h + 2);
+      ctx.fillStyle = hover ? '#1f1a08' : '#0d0d1a';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      text(b.label, b.x + 8, b.y + (b.h - 6) / 2, 6, hover ? '#ffffff' : '#cccccc');
+      text(b.hint, b.x + b.w - 6, b.y + (b.h - 6) / 2, 6, '#555566', 'right');
+    }
+    text('ESC / ENTER TO RETURN', W / 2, 220, 6, '#888888', 'center');
   }
 
   // account hub: shows tag + vault key, switch/new account options
@@ -3137,7 +3549,7 @@
 
     text('TYPE A-Z  —  BACKSPACE TO ERASE', W / 2, 180, 6, '#888888', 'center');
     if (nameDraft.length === 3 && game.blinkOn) {
-      text('PRESS ENTER TO CONFIRM', W / 2, 205, 8, '#33cc66', 'center');
+      text('ENTER OR TAP TO CONFIRM', W / 2, 205, 8, '#33cc66', 'center');
     }
     text('SHOWN ON THE GLOBAL LEADERBOARD', W / 2, 240, 6, '#555555', 'center');
   }
@@ -3606,10 +4018,17 @@
 
     if (game.bossWave) {
       if (game.blinkOn) {
-        text('! BOSS WAVE !', W / 2, cy + 72, 8, '#ff2d2d', 'center');
+        text('! BOSS WAVE !', W / 2, cy + 68, 8, '#ff2d2d', 'center');
       }
+      // tease the incoming boss by name (kind rotation is deterministic)
+      var upKind = BOSS_KINDS[(Math.round(game.wave / 10) - 1 + 300) % 3];
+      text(BOSS_DEFS[upKind].name, W / 2, cy + 84, 6, BOSS_DEFS[upKind].color, 'center');
     } else {
-      text('~' + game.waveTarget + ' ENEMIES', W / 2, cy + 76, 6, '#ffffff', 'center');
+      text('~' + game.waveTarget + ' ENEMIES', W / 2, cy + 68, 6, '#ffffff', 'center');
+      // announce the biome on the first wave after each boss (11, 21, 31...)
+      if (game.wave > 10 && game.wave % 10 === 1) {
+        text('ENTERING ' + currentBiome().name, W / 2, cy + 84, 6, '#ffb347', 'center');
+      }
     }
   }
 
@@ -3642,10 +4061,18 @@
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
 
+    // once we leave the initials screen, dismiss the mobile keyboard
+    if (game.gameState !== 'nameentry' && document.activeElement === nameInput) {
+      nameInput.blur();
+    }
+
     if (game.gameState === 'title') {
       renderTitle();
     } else if (game.gameState === 'nameentry') {
       renderNameEntry();
+      drawScanlines();
+    } else if (game.gameState === 'settings') {
+      renderSettings();
       drawScanlines();
     } else if (game.gameState === 'account') {
       renderAccount();

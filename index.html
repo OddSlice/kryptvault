@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.2c';
+  var GAME_VERSION = '0.2d';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -59,39 +59,67 @@
   canvas.height = H;
   ctx.imageSmoothingEnabled = false;
 
-  // Hidden text field for name entry. The game reads raw key events, which
-  // works on desktop but never raises a soft keyboard on mobile (and soft
-  // keyboards send no e.code anyway). Focusing this real <input> inside the
-  // tap gesture pops the mobile keyboard, and its value drives nameDraft so
-  // on-screen typing works regardless of key codes.
-  var nameInput = document.createElement('input');
-  nameInput.type = 'text';
-  nameInput.maxLength = 3;
-  nameInput.autocapitalize = 'characters';
-  nameInput.autocomplete = 'off';
-  nameInput.setAttribute('autocorrect', 'off');
-  nameInput.spellcheck = false;
-  nameInput.setAttribute('aria-hidden', 'true');
-  nameInput.tabIndex = -1;
-  // visually hidden but still focusable; 16px font stops iOS auto-zoom
-  nameInput.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;' +
-    'opacity:0.01;border:0;padding:0;margin:0;font-size:16px;background:transparent;' +
-    'color:transparent;caret-color:transparent;z-index:-1;pointer-events:none;';
-  document.body.appendChild(nameInput);
+  // Hidden text fields for the typed screens. The game reads raw key events,
+  // which works on desktop but never raises a soft keyboard on mobile (and soft
+  // keyboards send no e.code anyway). Focusing a real <input> inside the tap
+  // gesture pops the mobile keyboard, and its value drives the field so on-
+  // screen typing works regardless of key codes. One input per typed screen.
+  function makeHiddenInput(maxLen) {
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.maxLength = maxLen;
+    inp.autocapitalize = 'characters';
+    inp.autocomplete = 'off';
+    inp.setAttribute('autocorrect', 'off');
+    inp.spellcheck = false;
+    inp.setAttribute('aria-hidden', 'true');
+    inp.tabIndex = -1;
+    // visually hidden but still focusable; 16px font stops iOS auto-zoom
+    inp.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;' +
+      'opacity:0.01;border:0;padding:0;margin:0;font-size:16px;background:transparent;' +
+      'color:transparent;caret-color:transparent;z-index:-1;pointer-events:none;';
+    document.body.appendChild(inp);
+    return inp;
+  }
+  var nameInput = makeHiddenInput(3);
+  var loginInput = makeHiddenInput(20); // slack for #/space the user may type
 
-  function focusNameInput() {
-    nameInput.value = nameDraft;
-    try { nameInput.focus({ preventScroll: true }); } catch (e) { nameInput.focus(); }
+  function focusHiddenInput(inp, val) {
+    inp.value = val;
+    try { inp.focus({ preventScroll: true }); } catch (e) { inp.focus(); }
   }
-  function blurNameInput() {
-    if (document.activeElement === nameInput) nameInput.blur();
+  function blurHiddenInput(inp) {
+    if (document.activeElement === inp) inp.blur();
   }
-  // soft-keyboard / desktop typing into the field: mirror it into nameDraft
+  // thin wrappers kept for the name-entry call sites
+  function focusNameInput() { focusHiddenInput(nameInput, nameDraft); }
+  function blurNameInput() { blurHiddenInput(nameInput); }
+
+  // soft-keyboard / desktop typing into the initials field -> nameDraft
   nameInput.addEventListener('input', function () {
     if (game.gameState !== 'nameentry') return;
     var v = (nameInput.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
     nameDraft = v;
     nameInput.value = v;
+  });
+
+  // login buffer is 15 chars: 3 letters (name) + 4 digits (tag) + 8 alnum (key)
+  function sanitizeLoginBuf(raw) {
+    var s = (raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    var out = '';
+    for (var i = 0; i < s.length && out.length < 15; i++) {
+      var c = s[i], pos = out.length;
+      if (pos < 3) { if (c >= 'A' && c <= 'Z') out += c; }        // name letters
+      else if (pos < 7) { if (c >= '0' && c <= '9') out += c; }   // tag digits
+      else { out += c; }                                          // key alnum
+    }
+    return out;
+  }
+  loginInput.addEventListener('input', function () {
+    if (game.gameState !== 'login') return;
+    loginForm.buf = sanitizeLoginBuf(loginInput.value);
+    loginInput.value = loginForm.buf;
+    if (loginForm.state === 'fail' || loginForm.state === 'offline') loginForm.state = 'idle';
   });
 
   // Scale factor used to translate mouse coords into game coords.
@@ -409,23 +437,28 @@
         }
       }
     } else if (game.gameState === 'login') {
-      var pos = loginForm.buf.length;
-      if (/^Key[A-Z]$/.test(e.code)) {
-        var letter = e.code.slice(3);
-        if (pos < 3 || (pos >= 7 && pos < 15)) loginForm.buf += letter;
-      } else if (/^(Digit|Numpad)[0-9]$/.test(e.code)) {
-        var digit = e.code.slice(-1);
-        if ((pos >= 3 && pos < 7) || (pos >= 7 && pos < 15)) loginForm.buf += digit;
-      } else if (e.code === 'Backspace') {
-        loginForm.buf = loginForm.buf.slice(0, -1);
-        loginForm.state = 'idle';
-        e.preventDefault();
-      } else if (e.code === 'Escape') {
+      if (e.code === 'Escape') {
         game.gameState = 'account';
+        blurHiddenInput(loginInput);
+      } else if (document.activeElement !== loginInput) {
+        // fallback physical-key entry when the hidden input isn't capturing keys;
+        // when it IS focused, its 'input' event is the single source of truth
+        var pos = loginForm.buf.length;
+        if (/^Key[A-Z]$/.test(e.code)) {
+          var letter = e.code.slice(3);
+          if (pos < 3 || (pos >= 7 && pos < 15)) loginForm.buf += letter;
+        } else if (/^(Digit|Numpad)[0-9]$/.test(e.code)) {
+          var digit = e.code.slice(-1);
+          if ((pos >= 3 && pos < 7) || (pos >= 7 && pos < 15)) loginForm.buf += digit;
+        } else if (e.code === 'Backspace') {
+          loginForm.buf = loginForm.buf.slice(0, -1);
+          loginForm.state = 'idle';
+          e.preventDefault();
+        }
       }
     } else if (game.gameState === 'account') {
       if (e.code === 'Digit1') { enterNameEntry('title'); }
-      else if (e.code === 'Digit2') { loginForm.buf = ''; loginForm.state = 'idle'; game.gameState = 'login'; }
+      else if (e.code === 'Digit2') { enterLogin(); }
       else if (e.code === 'Escape') { game.gameState = 'title'; }
     } else if (game.gameState === 'codex') {
       if (e.code === 'Escape' || e.code === 'KeyR') game.gameState = 'title';
@@ -589,7 +622,7 @@
         var abtn = ACCOUNT_BTNS[ab];
         if (p.x >= abtn.x && p.x <= abtn.x + abtn.w && p.y >= abtn.y && p.y <= abtn.y + abtn.h) {
           if (abtn.id === 'newacct') { enterNameEntry('title'); }
-          else { loginForm.buf = ''; loginForm.state = 'idle'; game.gameState = 'login'; }
+          else { enterLogin(); }
           return;
         }
       }
@@ -655,6 +688,14 @@
     afterName = after;
     game.gameState = 'nameentry';
     focusNameInput();
+  }
+
+  // Enter the login screen from a user gesture, raising the mobile keyboard.
+  function enterLogin() {
+    loginForm.buf = '';
+    loginForm.state = 'idle';
+    game.gameState = 'login';
+    focusHiddenInput(loginInput, '');
   }
 
   function finishNameStep() {
@@ -1054,11 +1095,13 @@
         saveRunData();
         loginForm.state = 'idle';
         loginForm.buf = '';
+        loginInput.value = '';
         game.toasts.push({ txt: 'LOGGED IN AS ' + playerTag(), t: 0 });
         game.gameState = 'title';
       } else {
         loginForm.state = res === null ? 'fail' : 'offline';
         loginForm.buf = loginForm.buf.slice(0, 7); // keep tag, clear the key
+        loginInput.value = loginForm.buf;          // keep the field in sync
       }
     });
   }
@@ -3495,7 +3538,7 @@
     } else if (loginForm.state === 'offline') {
       text('OFFLINE — TRY AGAIN LATER', W / 2, 216, 8, '#ff5555', 'center');
     } else if (buf.length === 15 && game.blinkOn) {
-      text('PRESS ENTER TO LOGIN', W / 2, 216, 8, '#33cc66', 'center');
+      text('ENTER OR TAP TO LOGIN', W / 2, 216, 8, '#33cc66', 'center');
     }
     text('ESC TO GO BACK', W / 2, 244, 6, '#888888', 'center');
   }
@@ -4061,9 +4104,12 @@
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
 
-    // once we leave the initials screen, dismiss the mobile keyboard
+    // once we leave a typed screen, dismiss the mobile keyboard
     if (game.gameState !== 'nameentry' && document.activeElement === nameInput) {
       nameInput.blur();
+    }
+    if (game.gameState !== 'login' && document.activeElement === loginInput) {
+      loginInput.blur();
     }
 
     if (game.gameState === 'title') {

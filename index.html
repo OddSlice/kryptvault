@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.3';
+  var GAME_VERSION = '0.3a';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -1590,9 +1590,16 @@
     curseSpeedMult: 1,
     cultistLevel: 0,
     dmgDealt: 0,          // run summary stat
+    dmgBySource: {},      // damage attribution per source (shot/orb/static/bomb/...)
     newRecord: false,     // did the last run break a personal best?
     player: null
   };
+
+  // Tally damage dealt, both total and per-source (for the game-over breakdown).
+  function addDmg(amount, source) {
+    game.dmgDealt += amount;
+    game.dmgBySource[source] = (game.dmgBySource[source] || 0) + amount;
+  }
 
   function makePlayer() {
     return {
@@ -1669,6 +1676,7 @@
     game.curseSpeedMult = 1;
     game.cultistLevel = 0;
     game.dmgDealt = 0;
+    game.dmgBySource = {};
     game.floatTexts = [];
     game.pickups = [];
     game.hitStop = 0;
@@ -1733,13 +1741,7 @@
     } else {
       game.waveBanner = 2.0;
       game.gameState = 'playing';
-      // breather: a small heal for surviving the wave
-      var hpl = game.player;
-      var heal = Math.min(Math.round(15 * hpl.healMult), hpl.maxHp - hpl.hp);
-      if (heal > 0) {
-        hpl.hp += heal;
-        spawnFloatText(hpl.x, hpl.y, '+' + Math.round(heal), '#33ff66');
-      }
+      // no wave-transition heal — HP only changes from combat, pickups and upgrades
       if (game.bossWave) spawnBoss();
     }
   }
@@ -2229,7 +2231,7 @@
           var ze = zapTargets[zt].e;
           ze.hp -= zapDmg;
           ze.hitFlash = 0.1;
-          game.dmgDealt += zapDmg;
+          addDmg(zapDmg, 'static');
           spawnFloatText(ze.x, ze.y, '' + zapDmg, '#f5f76e');
           game.zaps.push({ x1: p.x, y1: p.y, x2: ze.x, y2: ze.y, t: 0.15 });
           if (ze.hp <= 0) {
@@ -2533,7 +2535,7 @@
         if (Math.abs(proj.x - en.x) < (en.w / 2 + 3) &&
             Math.abs(proj.y - en.y) < (en.h / 2 + 3)) {
           en.hp -= proj.damage;
-          game.dmgDealt += proj.damage;
+          addDmg(proj.damage, 'shot');
           spawnFloatText(en.x, en.y, '' + Math.round(proj.damage), '#ffe600');
           en.hitFlash = 0.08;
           // frost shots chill whatever they hit
@@ -2595,7 +2597,7 @@
             if (game.time >= until) {
               var orbDmg = p.bladeOrbit ? 40 : 15;
               oen.hp -= orbDmg;
-              game.dmgDealt += orbDmg;
+              addDmg(orbDmg, 'orb');
               spawnFloatText(oen.x, oen.y, '' + orbDmg, '#00e5ff');
               oen.hitFlash = 0.08;
               orb.hitCd[oen.uid] = game.time + 0.5; // per-orb, per-enemy cooldown
@@ -2661,7 +2663,7 @@
       if (ox * ox + oy * oy < 50 * 50) {
         o.hp -= 40;
         o.hitFlash = 0.1;
-        game.dmgDealt += 40;
+        addDmg(40, 'other');
         if (o.hp <= 0) {
           if (o.isBoss) killBoss(i, o); else killEnemy(i, o);
         }
@@ -2706,7 +2708,7 @@
         var e = game.enemies[i];
         e.hp -= 60;
         e.hitFlash = 0.1;
-        game.dmgDealt += 60;
+        addDmg(60, 'bomb');
         spawnFloatText(e.x, e.y, '60', '#ff9f1c');
         if (e.hp <= 0) {
           if (e.isBoss) killBoss(i, e); else killEnemy(i, e);
@@ -3968,33 +3970,79 @@
     ctx.fillRect(0, 0, W, H);
     drawAnimatedScanlines(0.05);
 
-    text('YOU DIED', W / 2, 52, 16, '#ff2d2d', 'center');
-    // this run's stats
-    text('WAVE ' + pad(game.wave, 2) + '  KILLS ' + pad(game.score, 4) + '  LVL ' + pad(game.level, 2),
-         W / 2, 88, 8, '#ffffff', 'center');
-    // run summary
+    text('YOU DIED', W / 2, 22, 16, '#ff2d2d', 'center');
+    if (game.newRecord) {
+      text('★ NEW RECORD ★', W / 2, 46, 8, '#FFD700', 'center');
+    } else if (game.mode === 'daily') {
+      text('DAILY CHALLENGE', W / 2, 46, 6, '#ff2dd0', 'center');
+    }
+
+    // ----- stat grid: 4 columns, label above value (scannable) -----
     var mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
-    text('TIME ' + pad(mins, 2) + ':' + pad(secs, 2) +
-         '   DMG ' + pad(Math.round(game.dmgDealt), 6) +
-         '   ' + currentClass.toUpperCase() +
-         (game.mode === 'daily' ? '  [DAILY]' : ''), W / 2, 108, 6, '#bbbbbb', 'center');
-    text('COINS EARNED: +' + Math.round(game.coinsEarned), W / 2, 120, 6, '#FFD700', 'center');
-    if (game.newRecord && game.blinkOn) {
-      text('NEW RECORD!', W / 2, 134, 10, '#ff2d2d', 'center');
+    var stats = [
+      { l: 'WAVE',  v: pad(game.wave, 2) },
+      { l: 'KILLS', v: '' + game.score },
+      { l: 'LEVEL', v: pad(game.level, 2) },
+      { l: 'TIME',  v: pad(mins, 1) + ':' + pad(secs, 2) }
+    ];
+    for (var gi = 0; gi < 4; gi++) {
+      var gcx = (gi + 0.5) * W / 4;
+      text(stats[gi].l, gcx, 66, 6, '#888899', 'center');
+      text(stats[gi].v, gcx, 78, 12, '#ffffff', 'center');
     }
-    // all-time bests beneath
-    text('BEST: WAVE ' + pad(runData.bestWave, 2) + '  KILLS ' + pad(runData.bestKills, 4) +
-         '  LVL ' + pad(runData.bestLevel, 2), W / 2, 152, 6, '#888888', 'center');
-    // leaderboard submission status
+    // class + coins
+    text(currentClass.toUpperCase(), W / 2, 104, 6, '#bbbbbb', 'center');
+    text('+' + Math.round(game.coinsEarned) + ' COINS', W / 2, 116, 6, '#FFD700', 'center');
+
+    // ----- damage attribution: a stacked bar (what actually carried the run) -----
+    if (game.dmgDealt > 0) {
+      var order = ['shot', 'orb', 'static', 'bomb', 'other'];
+      var labels = { shot: 'SHOTS', orb: 'ORBS', static: 'STATIC', bomb: 'BOMB', other: 'OTHER' };
+      var cols = { shot: '#ffe600', orb: '#00e5ff', static: '#f5f76e', bomb: '#ff9f1c', other: '#9fb0c0' };
+      var parts = [];
+      for (var di = 0; di < order.length; di++) {
+        var v = game.dmgBySource[order[di]] || 0;
+        if (v > 0) parts.push({ k: order[di], pct: Math.round(100 * v / game.dmgDealt) });
+      }
+      text('DAMAGE DEALT  ' + Math.round(game.dmgDealt), W / 2, 138, 6, '#888899', 'center');
+      // the stacked bar
+      var barX = 70, barY = 150, barW = 340, barH = 10, sx = barX;
+      ctx.fillStyle = '#000'; ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+      ctx.fillStyle = '#1a1420'; ctx.fillRect(barX, barY, barW, barH);
+      for (var si = 0; si < parts.length; si++) {
+        var segW = (si === parts.length - 1) ? (barX + barW - sx) : Math.round(barW * parts[si].pct / 100);
+        ctx.fillStyle = cols[parts[si].k];
+        ctx.fillRect(sx, barY, segW, barH);
+        sx += segW;
+      }
+      // legend, centred: colour swatch + LABEL pct%
+      ctx.font = '6px "Press Start 2P"';
+      var lstrs = parts.map(function (pp) { return labels[pp.k] + ' ' + pp.pct + '%'; });
+      var lw = 0;
+      for (var li = 0; li < lstrs.length; li++) lw += 9 + ctx.measureText(lstrs[li]).width + 12;
+      lw -= 12;
+      var lx = W / 2 - lw / 2;
+      for (var lj = 0; lj < parts.length; lj++) {
+        ctx.fillStyle = cols[parts[lj].k];
+        ctx.fillRect(lx, 168, 5, 5);
+        text(lstrs[lj], lx + 9, 168, 6, '#cccccc');
+        lx += 9 + ctx.measureText(lstrs[lj]).width + 12;
+      }
+    }
+
+    // ----- best + submit status (secondary) -----
+    text('BEST  W' + pad(runData.bestWave, 2) + ' · ' + runData.bestKills + ' KILLS · LVL ' + pad(runData.bestLevel, 2),
+         W / 2, 190, 6, '#777788', 'center');
     if (leaderboard.submitState === 'sending') {
-      text('SUBMITTING SCORE...', W / 2, 168, 6, '#777777', 'center');
+      text('SUBMITTING SCORE...', W / 2, 204, 6, '#777777', 'center');
     } else if (leaderboard.submitState === 'done') {
-      text('SCORE SUBMITTED AS ' + runData.name, W / 2, 168, 6, '#33cc66', 'center');
+      text('SUBMITTED AS ' + runData.name, W / 2, 204, 6, '#33cc66', 'center');
     } else if (leaderboard.submitState === 'error') {
-      text('SCORE SUBMIT FAILED — OFFLINE?', W / 2, 168, 6, '#883333', 'center');
+      text('SUBMIT FAILED — OFFLINE?', W / 2, 204, 6, '#883333', 'center');
     }
+
     if (game.blinkOn) {
-      text('PRESS ENTER OR CLICK TO RESTART', W / 2, 195, 6, '#ffffff', 'center');
+      text('PRESS ENTER OR CLICK TO RESTART', W / 2, 236, 6, '#ffffff', 'center');
     }
   }
 

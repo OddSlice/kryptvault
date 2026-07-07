@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.3a';
+  var GAME_VERSION = '0.3b';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -876,11 +876,11 @@
     { id: 'xpmagnet',  name: 'XP MAGNET',  desc: '+20% XP from kills',     con: 'FOES +8% SPEED',  detail: 'STACKS',                 color: '#5f27cd' },
     { id: 'shotgun',   name: 'SHOTGUN',    desc: '5-shot 60deg blast',     con: 'FIRE 0.1s SLOWER', detail: 'STACKS: +2 PELLETS',    color: '#ff9f1c' },
     { id: 'homing',    name: 'HOMING SHOT',desc: 'Shots seek foes',        con: 'SHOTS 15% SLOWER', detail: 'STACKS: STRONGER SEEK', color: '#2ec4b6' },
-    { id: 'shield',    name: 'ORBIT SHIELD',desc:'3 orbs circle you',      con: '-8 MOVE SPEED',   detail: 'STACKS: +1 ORB',         color: '#00e5ff' },
+    { id: 'shield',    name: 'ORBIT SHIELD',desc:'4 orbs circle you',      con: '-8 MOVE SPEED',   detail: 'STACKS: +1 ORB',         color: '#00e5ff' },
     { id: 'frost',     name: 'FROST SHOTS', desc: 'Hits slow foes 30%',    con: '-10% DAMAGE',     detail: 'STACKS: STRONGER SLOW',  color: '#8fd8ff' },
     { id: 'ricochet',  name: 'RICOCHET',    desc: 'Shots bounce to a foe', con: '-10% DAMAGE',     detail: 'STACKS: +1 BOUNCE',      color: '#ffb347' },
     { id: 'regen',     name: 'REGEN',       desc: '+1 HP per second',      con: '-10% DAMAGE',     detail: 'STACKS',                 color: '#7bed9f' },
-    { id: 'static',    name: 'STATIC BURST',desc: 'Zap 3 foes for 40 every 6s', con: 'FIRE 0.05s SLOWER', detail: 'STACKS: +1 TARGET, +15 DMG', color: '#f5f76e' },
+    { id: 'static',    name: 'STATIC BURST',desc: 'Zap 3 foes for 70 every 2.5s', con: 'FIRE 0.05s SLOWER', detail: 'STACKS: +1 TARGET, +15 DMG', color: '#f5f76e' },
     // cursed upgrades: a strong boost with a permanent downside
     { id: 'greed',       name: 'GREED',        desc: '+100% coins',   con: 'FOES +30% HP',      detail: 'PAIRS WITH FORTUNE PERK', color: '#FFD700', cursed: true },
     { id: 'darkpact',    name: 'DARK PACT',    desc: '+1 projectile', con: 'CULTISTS HUNT YOU', detail: 'STACKS - MAX 6 SHOTS',    color: '#9b59b6', cursed: true },
@@ -1078,7 +1078,7 @@
   // Evolutions: rare combo cards offered once both base upgrades are owned.
   var EVOLUTIONS = [
     { id: 'seekerswarm', name: 'SEEKER SWARM', desc: '+4 pellets, pellets hit harder', con: 'SHOTS 10% SLOWER', detail: 'SHOTGUN + HOMING', color: '#ff2dd0', evolution: true, needs: ['shotgun', 'homing'] },
-    { id: 'bladeorbit',  name: 'BLADE ORBIT',  desc: 'Orbs deal 40 dmg, spin faster',  con: '-5 MOVE SPEED',   detail: 'SHIELD + DMG BOOST', color: '#ff4444', evolution: true, needs: ['shield', 'damage'] },
+    { id: 'bladeorbit',  name: 'BLADE ORBIT',  desc: '+2 orbs, 40 dmg, spin faster',  con: '-5 MOVE SPEED',   detail: 'SHIELD + DMG BOOST', color: '#ff4444', evolution: true, needs: ['shield', 'damage'] },
     { id: 'railgun',     name: 'RAILGUN',      desc: 'Infinite pierce, +25 dmg', con: 'FIRE 0.3s SLOWER', detail: 'PIERCE + DMG BOOST', color: '#00ffcc', evolution: true, needs: ['pierce', 'damage'] },
     { id: 'bulletstorm', name: 'BULLET STORM', desc: '+1 shot past the cap, fire faster', con: '-10% DAMAGE',  detail: 'MULTI-SHOT + ATK SPD', color: '#ff6bff', evolution: true, needs: ['multishot', 'atkspeed'] }
   ];
@@ -1378,7 +1378,7 @@
   // STARTING CLASSES (unlocked by reaching wave 3 once)
   // ---------------------------------------------------------------------------
   var CLASSES = [
-    { id: 'warrior', name: 'WARRIOR', color: '#cc3333', hp: 200, speed: 60,  damage: 32, cooldown: 1.2, pierce: 0, homingBase: 0,    bars: [5, 2, 4], tile: TILE.heroWarrior },
+    { id: 'warrior', name: 'WARRIOR', color: '#cc3333', hp: 200, speed: 60,  damage: 32, cooldown: 1.0, pierce: 0, homingBase: 0,    bars: [5, 2, 4], tile: TILE.heroWarrior },
     { id: 'rogue',   name: 'ROGUE',   color: '#33cc66', hp: 70,  speed: 125, damage: 14, cooldown: 0.4, pierce: 0, homingBase: 0,    bars: [2, 5, 2], tile: TILE.heroRogue },
     { id: 'mage',    name: 'MAGE',    color: '#6633cc', hp: 80,  speed: 70,  damage: 40, cooldown: 1.0, pierce: 1, homingBase: 0.06, bars: [2, 2, 5], tile: TILE.heroMage },
     // Ranger: coin-unlocked 4th class — fragile, slow fire, but long fast arrows
@@ -1634,7 +1634,7 @@
       ricochet: 0,       // bounce count
       regen: 0,          // HP per second
       staticLvl: 0,      // periodic zap level
-      staticTimer: 3,
+      staticTimer: 2.5,
       healMult: 1,       // blood altar halves this
       barrier: 0,        // pickup: hits absorbed
       orbs: [],          // orbiting shield orbs
@@ -1647,9 +1647,10 @@
   // Rebuild the orbiting-shield orbs from the current shield level.
   function rebuildOrbs() {
     var p = game.player;
-    var count = 2 + p.shield;                              // 1st pick = 3 orbs, +1 each after
-    p.orbSpeed = (120 + (p.shield - 1) * 30) * Math.PI / 180; // 120deg/s, +30 per extra pick
-    if (p.bladeOrbit) p.orbSpeed *= 1.3;                   // evolution: faster spin
+    var count = 3 + p.shield;                              // 1st pick = 4 orbs, +1 each after
+    if (p.bladeOrbit) count += 2;                          // evolution: +2 orbs
+    p.orbSpeed = (150 + (p.shield - 1) * 35) * Math.PI / 180; // 150deg/s, +35 per extra pick
+    if (p.bladeOrbit) p.orbSpeed *= 1.5;                   // evolution: faster spin
     var orbs = [];
     for (var i = 0; i < count; i++) {
       orbs.push({ angle: (Math.PI * 2 / count) * i, x: p.x, y: p.y, hitCd: {} });
@@ -2220,13 +2221,13 @@
     if (p.staticLvl > 0) {
       p.staticTimer -= dt;
       if (p.staticTimer <= 0) {
-        p.staticTimer = 6;
+        p.staticTimer = 2.5;
         var zapTargets = game.enemies.slice()
           .map(function (en2) { var zdx = en2.x - p.x, zdy = en2.y - p.y; return { e: en2, d: zdx * zdx + zdy * zdy }; })
           .filter(function (t2) { return t2.d < 180 * 180; })
           .sort(function (a2, b2) { return a2.d - b2.d; })
           .slice(0, 2 + p.staticLvl);
-        var zapDmg = 40 + (p.staticLvl - 1) * 15;
+        var zapDmg = 70 + (p.staticLvl - 1) * 15;
         for (var zt = 0; zt < zapTargets.length; zt++) {
           var ze = zapTargets[zt].e;
           ze.hp -= zapDmg;
@@ -2590,7 +2591,7 @@
         // collide with enemies (descending so splices are safe)
         for (var oe = game.enemies.length - 1; oe >= 0; oe--) {
           var oen = game.enemies[oe];
-          var rr = oen.w / 2 + 6;
+          var rr = oen.w / 2 + 10;
           var odx = orb.x - oen.x, ody = orb.y - oen.y;
           if (odx * odx + ody * ody < rr * rr) {
             var until = orb.hitCd[oen.uid] || 0;
@@ -2600,7 +2601,7 @@
               addDmg(orbDmg, 'orb');
               spawnFloatText(oen.x, oen.y, '' + orbDmg, '#00e5ff');
               oen.hitFlash = 0.08;
-              orb.hitCd[oen.uid] = game.time + 0.5; // per-orb, per-enemy cooldown
+              orb.hitCd[oen.uid] = game.time + 0.3; // per-orb, per-enemy cooldown
               if (oen.hp <= 0) {
                 if (oen.isBoss) killBoss(oe, oen); else killEnemy(oe, oen);
               }
@@ -2749,6 +2750,8 @@
       playPickup();
       return;
     }
+    // warriors shrug off 12% of all incoming damage (innate armor)
+    if (currentClass === 'warrior') amount = Math.max(1, Math.round(amount * 0.88));
     p.hp -= amount;
     p.invuln = 0.5;
     game.tookDamage = true;

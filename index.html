@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.3b';
+  var GAME_VERSION = '0.4';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -419,7 +419,7 @@
 
   function musicTrackForState() {
     var s = game.gameState;
-    return (s === 'playing' || s === 'waveintro' || s === 'levelup' || s === 'paused')
+    return (s === 'playing' || s === 'waveintro' || s === 'levelup' || s === 'ascend' || s === 'paused')
       ? 'combat' : 'lobby';
   }
 
@@ -449,6 +449,15 @@
   // ---------------------------------------------------------------------------
   var keys = {};
   var mouse = { x: 0, y: 0 };
+  // on-screen ability button (bottom-right): tap/click target for the
+  // ascendancy active; desktop can just press SPACE
+  var ABILITY_BTN = { x: W - 40, y: H - 52, w: 34, h: 34 };
+
+  function overAbilityBtn(p) {
+    return game.gameState === 'playing' && game.player && game.player.ascendancy &&
+           p.x >= ABILITY_BTN.x && p.x <= ABILITY_BTN.x + ABILITY_BTN.w &&
+           p.y >= ABILITY_BTN.y && p.y <= ABILITY_BTN.y + ABILITY_BTN.h;
+  }
 
   window.addEventListener('keydown', function (e) {
     ensureAudio();
@@ -534,6 +543,7 @@
     if (e.code === 'KeyM' && game.gameState !== 'nameentry' && game.gameState !== 'login') toggleMute();
     if (e.code === 'KeyF' && game.gameState !== 'nameentry' && game.gameState !== 'login') toggleSfx();
     if (e.code === 'Enter') handleConfirm();
+    if (e.code === 'Space' && game.gameState === 'playing') castAbility();
     if (e.code === 'KeyP' || e.code === 'Escape') {
       if (game.gameState === 'playing') game.gameState = 'paused';
       else if (game.gameState === 'paused') game.gameState = 'playing';
@@ -573,6 +583,8 @@
     var t = e.changedTouches[0];
     var p = toGameCoords(t.clientX, t.clientY);
     mouse.x = p.x; mouse.y = p.y;
+    // ability button eats the touch — don't start a joystick on it
+    if (overAbilityBtn(p)) { castAbility(); return; }
     touchCtl.active = true;
     touchCtl.id = t.identifier;
     touchCtl.ox = p.x; touchCtl.oy = p.y;
@@ -678,9 +690,12 @@
       game.gameState = 'title';
     } else if (game.gameState === 'levelup') {
       tryPickCard(p.x, p.y);
+    } else if (game.gameState === 'ascend') {
+      tryPickAscend(p.x, p.y);
     } else if (game.gameState === 'classselect') {
       tryPickClass(p.x, p.y);
     } else if (game.gameState === 'playing') {
+      if (overAbilityBtn(p)) { castAbility(); return; }
       // pause button hit-box (top-right, under the kill counter)
       if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 18 && p.y <= 38) {
         game.gameState = 'paused';
@@ -1084,9 +1099,81 @@
   ];
 
   // ---------------------------------------------------------------------------
+  // ASCENDANCIES — one-time subclass draft after slaying the first boss (wave
+  // 10). Each grants a spacebar/touch active on a cooldown plus a passive.
+  // ---------------------------------------------------------------------------
+  var ASCENDANCIES = {
+    warrior: [
+      { id: 'juggernaut', name: 'JUGGERNAUT', color: '#ff6a3a', cd: 8,
+        active: 'CHARGE: unstoppable dash that tramples foes',
+        passive: 'PASSIVE: +10% damage reduction' },
+      { id: 'berserker', name: 'BERSERKER', color: '#ff2d2d', cd: 10,
+        active: 'WHIRLWIND: axe nova hits everything near you',
+        passive: 'PASSIVE: +35% damage below half HP' }
+    ],
+    rogue: [
+      { id: 'phantom', name: 'PHANTOM', color: '#9fefff', cd: 6,
+        active: 'SHADOWSTEP: blink ahead, brief invulnerability',
+        passive: 'PASSIVE: +15 move speed' },
+      { id: 'assassin', name: 'ASSASSIN', color: '#33cc66', cd: 9,
+        active: 'FAN OF BLADES: 12 daggers in every direction',
+        passive: 'PASSIVE: 20% crit chance for double damage' }
+    ],
+    mage: [
+      { id: 'frostmage', name: 'FROST MAGE', color: '#7fd7ff', cd: 12,
+        active: 'FROST NOVA: freeze nearby foes solid for 2s',
+        passive: 'PASSIVE: your shots chill enemies' },
+      { id: 'lightmage', name: 'LIGHT MAGE', color: '#fff3a0', cd: 8,
+        active: 'RADIANT BEAM: piercing ray burns a whole lane',
+        passive: 'PASSIVE: shots home in on enemies' }
+    ],
+    ranger: [
+      { id: 'sniper', name: 'SNIPER', color: '#c99a3a', cd: 7,
+        active: 'DEADEYE: massive arrow, triple damage, pierces all',
+        passive: 'PASSIVE: +25% arrow speed' },
+      { id: 'trapper', name: 'TRAPPER', color: '#7dbb42', cd: 9,
+        active: 'SPIKE TRAP: drop a zone that shreds and slows',
+        passive: 'PASSIVE: +1 pierce' }
+    ]
+  };
+
+  // ---------------------------------------------------------------------------
   // CARD ART — 12x12 pixel icons ('.' = transparent, letters index the palette)
   // ---------------------------------------------------------------------------
   var CARD_ART = {
+    // ----- ascendancy icons -----
+    juggernaut: { pal: { O: '#ff6a3a', W: '#ffffff', D: '#a03a1a' }, rows: [
+      '............', '......O.....', '......OO....', '......OOO...',
+      'OOOOOOOOOO..', 'WOOOOOOOOOO.', 'WOOOOOOOOOOO', 'WOOOOOOOOOO.',
+      'OOOOOOOOOO..', '......OOO...', '......OO....', '......O.....'] },
+    berserker: { pal: { R: '#ff2d2d', W: '#dde4ec', B: '#8a5a2b' }, rows: [
+      '.WW......WW.', 'WWWW....WWWW', 'WWWWB..BWWWW', '.WWWB..BWWW.',
+      '..WBB..BBW..', '...BB..BB...', '...BB..BB...', '...BB..BB...',
+      '...BB..BB...', '...BB..BB...', '..RBB..BBR..', '...R....R...'] },
+    phantom: { pal: { C: '#9fefff', W: '#ffffff', D: '#3a6a7a' }, rows: [
+      '....CCCC....', '...CCCCCC...', '..CCCCCCCC..', '..CWCCCCWC..',
+      '..CDCCCCDC..', '..CCCCCCCC..', '..CCCCCCCC..', '..CCCCCCCC..',
+      '..CCCCCCCC..', '..CC.CC.CC..', '..C...C..C..', '............'] },
+    assassin: { pal: { G: '#33cc66', W: '#dde4ec', B: '#8a5a2b' }, rows: [
+      'W....W....W.', '.W...W...W..', '..W..W..W...', '..W..W..W...',
+      '...W.W.W....', '...W.W.W....', '....WWW.....', '....BBB.....',
+      '....GBG.....', '....BBB.....', '.....B......', '.....B......'] },
+    frostmage: { pal: { C: '#7fd7ff', W: '#ffffff' }, rows: [
+      '.....W......', '..C..W..C...', '...C.W.C....', '....CWC.....',
+      'WWWWWWWWWWW.', '....CWC.....', '...C.W.C....', '..C..W..C...',
+      '.....W......', '..C..W..C...', '.....W......', '............'] },
+    lightmage: { pal: { Y: '#fff3a0', W: '#ffffff', O: '#ffe600' }, rows: [
+      '.....WW.....', '.....WW.....', '..Y..WW..Y..', '...Y.WW.Y...',
+      'YYYYWWWWYYYY', '...Y.WW.Y...', '..Y..WW..Y..', '.....WW.....',
+      '.....WW.....', '.....WW.....', '.....OO.....', '.....OO.....'] },
+    sniper: { pal: { G: '#c99a3a', W: '#ffffff', D: '#8a5a2b' }, rows: [
+      '.....W......', '...WWWWW....', '..W..G..W...', '.W...G...W..',
+      '.W...G...W..', 'WGGGGGGGGGW.', '.W...G...W..', '.W...G...W..',
+      '..W..G..W...', '...WWWWW....', '.....W......', '............'] },
+    trapper: { pal: { G: '#7dbb42', B: '#8a5a2b', W: '#dde4ec' }, rows: [
+      '............', '............', '.W...W...W..', '.WW..WW..WW.',
+      '.WW..WW..WW.', 'BWWBBWWBBWWB', 'BBBBBBBBBBBB', 'BGGGGGGGGGGB',
+      'BBBBBBBBBBBB', '.BBBBBBBBBB.', '............', '............'] },
     multishot: { pal: { Y: '#ffe600', O: '#ff9f1c' }, rows: [
       '.Y...Y....Y.', 'YYY.YYY..YYY', '.O...O....O.', '.O...O....O.',
       '.O...O....O.', '.O...O....O.', '.O...O....O.', '.O...O....O.',
@@ -1364,7 +1451,9 @@
         mode: game.mode,
         disc: runData.playerDisc || null,
         player_id: runData.playerId || null,
-        ver: GAME_VERSION
+        ver: GAME_VERSION,
+        // build analytics: upgrade counts + chosen ascendancy (asc_* key)
+        upgrades: game.player ? game.player.upgradesTaken : null
       })
     }).then(function (r) {
       leaderboard.submitState = r.ok ? 'done' : 'error';
@@ -1580,6 +1669,8 @@
     hitStop: 0,           // brief world freeze on kills (game feel)
     toasts: [],           // achievement popups
     zaps: [],             // static-burst lightning visuals
+    beams: [],            // radiant-beam visuals (light mage active)
+    zones: [],            // spike-trap damage zones (trapper active)
     spawnHaste: 1,        // haste pact speeds up spawning
     freezeTimer: 0,       // chrono pickup freezes enemies
     coinsEarned: 0,       // coins banked at the end of the run
@@ -1640,6 +1731,15 @@
       orbs: [],          // orbiting shield orbs
       orbRadius: 40,
       orbSpeed: 0,       // radians/sec
+      // ascendancy (subclass drafted after the first boss)
+      ascendancy: null,  // the chosen ASCENDANCIES entry
+      abilityCd: 0,      // seconds until the active can fire again
+      abilityMaxCd: 0,   // for the HUD cooldown sweep
+      chargeT: 0,        // juggernaut: seconds of charge left
+      chargeVx: 0, chargeVy: 0,
+      chargeHits: null,  // enemies already trampled this charge
+      critChance: 0,     // assassin passive
+      ascendDR: 0,       // juggernaut passive (extra damage reduction)
       upgradesTaken: {}
     };
   }
@@ -1682,6 +1782,8 @@
     game.pickups = [];
     game.hitStop = 0;
     game.zaps = [];
+    game.beams = [];
+    game.zones = [];
     game.spawnHaste = 1;
     game.freezeTimer = 0;
     game.coinsEarned = 0;
@@ -1956,11 +2058,19 @@
   }
 
   function spawnProjectile(p, ang, dmg) {
+    // berserker passive: +35% damage while below half HP
+    if (p.ascendancy && p.ascendancy.id === 'berserker' && p.hp < p.maxHp * 0.5) {
+      dmg *= 1.35;
+    }
+    // assassin passive: crits hit for double
+    var crit = p.critChance > 0 && Math.random() < p.critChance;
+    if (crit) dmg *= 2;
     game.projectiles.push({
       x: p.x, y: p.y,
       vx: Math.cos(ang) * p.shotSpeed,
       vy: Math.sin(ang) * p.shotSpeed,
       damage: dmg,
+      crit: crit,
       pierce: p.railgun ? 99 : p.pierce,
       bounces: p.ricochet,
       // homing strength: 0.08 base, +0.04 per extra pick; mage has an
@@ -2137,6 +2247,174 @@
   }
 
   // ---------------------------------------------------------------------------
+  // ASCENDANCY — draft screen, pick handling, and the spacebar active
+  // ---------------------------------------------------------------------------
+  function triggerAscend() {
+    game.gameState = 'ascend';
+    playLevelUp();
+    var pair = ASCENDANCIES[currentClass] || ASCENDANCIES.warrior;
+    var cardW = 150, cardH = 180, gap = 28;
+    var totalW = pair.length * cardW + (pair.length - 1) * gap;
+    var startX = (W - totalW) / 2;
+    var cy = (H - cardH) / 2 + 8;
+    game.cards = pair.map(function (a, i) {
+      return { asc: a, x: startX + i * (cardW + gap), y: cy, w: cardW, h: cardH };
+    });
+  }
+
+  function tryPickAscend(mx, my) {
+    for (var i = 0; i < game.cards.length; i++) {
+      var c = game.cards[i];
+      if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) {
+        applyAscendancy(c.asc);
+        game.cards = [];
+        game.advanceAfterLevel = false;
+        beginWave(game.wave + 1);
+        return;
+      }
+    }
+  }
+
+  function applyAscendancy(a) {
+    var p = game.player;
+    p.ascendancy = a;
+    p.abilityCd = 0;
+    p.abilityMaxCd = a.cd;
+    p.upgradesTaken['asc_' + a.id] = 1; // shows up in run analytics
+    switch (a.id) {
+      case 'juggernaut': p.ascendDR = 0.10; break;
+      // berserker passive lives in spawnProjectile (needs live HP)
+      case 'phantom':    p.speed += 15; break;
+      case 'assassin':   p.critChance = 0.2; break;
+      case 'frostmage':  p.frost = Math.max(p.frost, 1); break;
+      case 'lightmage':  p.homingBase = Math.max(p.homingBase, 0.10); break;
+      case 'sniper':     p.shotSpeed = Math.round(p.shotSpeed * 1.25); break;
+      case 'trapper':    p.pierce += 1; break;
+    }
+  }
+
+  function castAbility() {
+    var p = game.player;
+    if (!p || !p.ascendancy || p.abilityCd > 0 || game.gameState !== 'playing') return;
+    var a = p.ascendancy;
+    p.abilityCd = a.cd;
+    p.abilityMaxCd = a.cd;
+    var target, ang, i, e, ddx, ddy;
+    switch (a.id) {
+      case 'juggernaut':
+        // charge toward the nearest enemy (or facing if the room is clear)
+        target = findNearestEnemy(p.x, p.y);
+        ang = target ? Math.atan2(target.y - p.y, target.x - p.x) : (p.facing === -1 ? Math.PI : 0);
+        p.chargeT = 0.45;
+        p.chargeVx = Math.cos(ang) * 320;
+        p.chargeVy = Math.sin(ang) * 320;
+        p.chargeHits = [];
+        break;
+      case 'berserker':
+        // axe nova: everything nearby takes a heavy hit
+        for (i = game.enemies.length - 1; i >= 0; i--) {
+          e = game.enemies[i];
+          ddx = e.x - p.x; ddy = e.y - p.y;
+          if (ddx * ddx + ddy * ddy < 70 * 70) {
+            e.hp -= 80;
+            addDmg(80, 'ability');
+            spawnFloatText(e.x, e.y, '80', a.color);
+            e.hitFlash = 0.08;
+            if (e.hp <= 0) { if (e.isBoss) killBoss(i, e); else killEnemy(i, e); }
+          }
+        }
+        game.shakeTimer = 0.25;
+        spawnRingParticles(p.x, p.y, a.color);
+        break;
+      case 'phantom':
+        // blink along the current move direction (facing if standing still)
+        var bdx = 0, bdy = 0;
+        if (keys['KeyW'] || keys['ArrowUp']) bdy -= 1;
+        if (keys['KeyS'] || keys['ArrowDown']) bdy += 1;
+        if (keys['KeyA'] || keys['ArrowLeft']) bdx -= 1;
+        if (keys['KeyD'] || keys['ArrowRight']) bdx += 1;
+        if (touchCtl.active && Math.abs(touchCtl.vx) + Math.abs(touchCtl.vy) > 0.2) {
+          bdx = touchCtl.vx; bdy = touchCtl.vy;
+        }
+        if (bdx === 0 && bdy === 0) bdx = p.facing;
+        var blen = Math.sqrt(bdx * bdx + bdy * bdy);
+        bdx /= blen; bdy /= blen;
+        spawnRingParticles(p.x, p.y, a.color);
+        // step outward and keep the last spot that isn't inside a wall
+        for (var step = 70; step >= 10; step -= 10) {
+          var bx = clamp(p.x + bdx * step, p.w / 2, W - p.w / 2);
+          var by = clamp(p.y + bdy * step, p.h / 2, H - p.h / 2);
+          if (!boxHitsWall(bx, by, p.w, p.h)) { p.x = bx; p.y = by; break; }
+        }
+        p.invuln = Math.max(p.invuln, 0.8);
+        break;
+      case 'assassin':
+        // fan of blades: a full ring of daggers at 1.5x damage
+        for (i = 0; i < 12; i++) {
+          spawnProjectile(p, (Math.PI * 2 / 12) * i, p.damage * 1.5);
+        }
+        break;
+      case 'frostmage':
+        for (i = 0; i < game.enemies.length; i++) {
+          e = game.enemies[i];
+          ddx = e.x - p.x; ddy = e.y - p.y;
+          if (ddx * ddx + ddy * ddy < 90 * 90) {
+            e.frozenT = 2;
+            e.slowT = Math.max(e.slowT || 0, 3);
+            e.slowAmt = 0.6;
+          }
+        }
+        spawnRingParticles(p.x, p.y, a.color);
+        break;
+      case 'lightmage':
+        target = findNearestEnemy(p.x, p.y);
+        ang = target ? Math.atan2(target.y - p.y, target.x - p.x) : (p.facing === -1 ? Math.PI : 0);
+        game.beams.push({ x: p.x, y: p.y, ang: ang, t: 0.25 });
+        // hit everything within 12px of the ray
+        var bcos = Math.cos(ang), bsin = Math.sin(ang);
+        for (i = game.enemies.length - 1; i >= 0; i--) {
+          e = game.enemies[i];
+          ddx = e.x - p.x; ddy = e.y - p.y;
+          var along = ddx * bcos + ddy * bsin;            // distance down the ray
+          var off = Math.abs(-ddx * bsin + ddy * bcos);   // distance off the ray
+          if (along > 0 && off < 12 + e.w / 2) {
+            e.hp -= 90;
+            addDmg(90, 'ability');
+            spawnFloatText(e.x, e.y, '90', a.color);
+            e.hitFlash = 0.08;
+            if (e.hp <= 0) { if (e.isBoss) killBoss(i, e); else killEnemy(i, e); }
+          }
+        }
+        break;
+      case 'sniper':
+        target = findNearestEnemy(p.x, p.y);
+        ang = target ? Math.atan2(target.y - p.y, target.x - p.x) : (p.facing === -1 ? Math.PI : 0);
+        spawnProjectile(p, ang, p.damage * 3);
+        var mega = game.projectiles[game.projectiles.length - 1];
+        mega.pierce = 99;
+        mega.vx *= 1.8; mega.vy *= 1.8;
+        mega.big = 1;
+        break;
+      case 'trapper':
+        game.zones.push({ x: p.x, y: p.y, r: 40, t: 4, tick: 0 });
+        break;
+    }
+    playPickup();
+  }
+
+  // small radial burst used by several ability visuals
+  function spawnRingParticles(x, y, color) {
+    for (var i = 0; i < 14; i++) {
+      var ang = (Math.PI * 2 / 14) * i;
+      game.particles.push({
+        x: x, y: y,
+        vx: Math.cos(ang) * 90, vy: Math.sin(ang) * 90,
+        life: 0.35, maxLife: 0.35, size: 2, color: color
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // UPDATE
   // ---------------------------------------------------------------------------
   function update(dt) {
@@ -2175,6 +2453,31 @@
 
     var p = game.player;
     if (p.invuln > 0) p.invuln -= dt;
+    if (p.abilityCd > 0) p.abilityCd -= dt;
+
+    // ----- juggernaut charge: unstoppable, tramples everything in the path -----
+    if (p.chargeT > 0) {
+      p.chargeT -= dt;
+      p.invuln = Math.max(p.invuln, 0.1);
+      var cnx = p.x + p.chargeVx * dt, cny = p.y + p.chargeVy * dt;
+      cnx = clamp(cnx, p.w / 2, W - p.w / 2);
+      cny = clamp(cny, p.h / 2, H - p.h / 2);
+      if (!boxHitsWall(cnx, cny, p.w, p.h)) { p.x = cnx; p.y = cny; }
+      else p.chargeT = 0; // slams into a wall
+      for (var ch = game.enemies.length - 1; ch >= 0; ch--) {
+        var ce = game.enemies[ch];
+        if (p.chargeHits.indexOf(ce) !== -1) continue;
+        var chdx = ce.x - p.x, chdy = ce.y - p.y;
+        if (chdx * chdx + chdy * chdy < 20 * 20) {
+          p.chargeHits.push(ce);
+          ce.hp -= 60;
+          addDmg(60, 'ability');
+          spawnFloatText(ce.x, ce.y, '60', '#ff6a3a');
+          ce.hitFlash = 0.08;
+          if (ce.hp <= 0) { if (ce.isBoss) killBoss(ch, ce); else killEnemy(ch, ce); }
+        }
+      }
+    }
 
     // ----- player movement -----
     var dx = 0, dy = 0;
@@ -2308,6 +2611,8 @@
       if (e.hitFlash > 0) e.hitFlash -= dt;
       if (game.freezeTimer > 0) continue; // frozen: no moving, fusing, or shooting
       if (e.slowT > 0) e.slowT -= dt;
+      // frost nova: frozen solid — no moving, fusing, or shooting
+      if (e.frozenT > 0) { e.frozenT -= dt; continue; }
       // desired velocity: chase the player, plus decaying knockback.
       // cultists keep their distance and shoot instead of melee-rushing.
       var edx = p.x - e.x, edy = p.y - e.y;
@@ -2500,6 +2805,34 @@
       }
     }
 
+    // ----- spike-trap zones: shred and chill whoever stands inside -----
+    for (var zn = game.zones.length - 1; zn >= 0; zn--) {
+      var z = game.zones[zn];
+      z.t -= dt; z.tick -= dt;
+      if (z.t <= 0) { game.zones.splice(zn, 1); continue; }
+      if (z.tick <= 0) {
+        z.tick = 0.5;
+        for (var ze = game.enemies.length - 1; ze >= 0; ze--) {
+          var zEn = game.enemies[ze];
+          var zdx = zEn.x - z.x, zdy = zEn.y - z.y;
+          if (zdx * zdx + zdy * zdy < z.r * z.r) {
+            zEn.hp -= 25;
+            addDmg(25, 'ability');
+            zEn.slowT = Math.max(zEn.slowT || 0, 0.8);
+            zEn.slowAmt = Math.max(zEn.slowAmt || 0, 0.4);
+            zEn.hitFlash = 0.08;
+            if (zEn.hp <= 0) { if (zEn.isBoss) killBoss(ze, zEn); else killEnemy(ze, zEn); }
+          }
+        }
+      }
+    }
+
+    // ----- radiant-beam visuals fade -----
+    for (var bm = game.beams.length - 1; bm >= 0; bm--) {
+      game.beams[bm].t -= dt;
+      if (game.beams[bm].t <= 0) game.beams.splice(bm, 1);
+    }
+
     // ----- edge shockwave effects tick -----
     for (var sw = game.shockwaves.length - 1; sw >= 0; sw--) {
       game.shockwaves[sw].t += dt;
@@ -2537,7 +2870,7 @@
             Math.abs(proj.y - en.y) < (en.h / 2 + 3)) {
           en.hp -= proj.damage;
           addDmg(proj.damage, 'shot');
-          spawnFloatText(en.x, en.y, '' + Math.round(proj.damage), '#ffe600');
+          spawnFloatText(en.x, en.y, '' + Math.round(proj.damage), proj.crit ? '#ff9f1c' : '#ffe600');
           en.hitFlash = 0.08;
           // frost shots chill whatever they hit
           if (p.frost > 0) {
@@ -2722,6 +3055,7 @@
   }
 
   function killBoss(index, en) {
+    game.lastBossName = en.name || 'THE BOSS';
     bossExplosion(en.x, en.y);
     if (en.name) spawnFloatText(en.x, en.y - 22, en.name + ' SLAIN', en.color);
     playBossDeath();
@@ -2733,9 +3067,13 @@
     game.score++;
     game.enemies.splice(index, 1);
     game.boss = null;
-    // boss always grants a level-up, then the next wave intro follows.
+    // first boss grants the ascendancy draft; later bosses a normal level-up.
     game.advanceAfterLevel = true;
-    gainXP(xpForNext() - game.xp + 1); // guarantees exactly one level-up
+    if (!game.player.ascendancy) {
+      triggerAscend();
+    } else {
+      gainXP(xpForNext() - game.xp + 1); // guarantees exactly one level-up
+    }
   }
 
   // Single entry point for anything that hurts the player: respects i-frames
@@ -2750,8 +3088,11 @@
       playPickup();
       return;
     }
-    // warriors shrug off 12% of all incoming damage (innate armor)
-    if (currentClass === 'warrior') amount = Math.max(1, Math.round(amount * 0.88));
+    // warriors shrug off 12% of all incoming damage (innate armor);
+    // the juggernaut ascendancy stacks another 10% on top
+    if (currentClass === 'warrior') amount = amount * 0.88;
+    if (p.ascendDR > 0) amount = amount * (1 - p.ascendDR);
+    amount = Math.max(1, Math.round(amount));
     p.hp -= amount;
     p.invuln = 0.5;
     game.tookDamage = true;
@@ -2930,12 +3271,18 @@
       if (pk.t < 2 && Math.floor(pk.t * 6) % 2 === 0) continue;
       var x = Math.round(pk.x), y = Math.round(pk.y);
       if (pk.type === 'potion') {
+        // classic red healing potion: pops against every biome floor
+        ctx.fillStyle = '#8a5a2b';
+        ctx.fillRect(x - 2, y - 9, 4, 2);        // cork
         ctx.fillStyle = '#dddddd';
-        ctx.fillRect(x - 2, y - 7, 4, 3);        // neck
-        ctx.fillStyle = '#33ff66';
-        ctx.fillRect(x - 4, y - 4, 8, 8);        // flask body
-        ctx.fillStyle = '#88ffaa';
-        ctx.fillRect(x - 3, y - 3, 2, 2);        // shine
+        ctx.fillRect(x - 2, y - 7, 4, 3);        // glass neck
+        ctx.fillStyle = '#ff2d2d';
+        ctx.fillRect(x - 4, y - 4, 8, 8);        // round flask body
+        ctx.fillRect(x - 5, y - 2, 10, 5);       // bulge
+        ctx.fillStyle = '#ff9a9a';
+        ctx.fillRect(x - 3, y - 3, 2, 3);        // shine
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x - 3, y - 3, 1, 1);        // glint
       } else if (pk.type === 'bomb') {
         ctx.fillStyle = '#222233';
         ctx.fillRect(x - 5, y - 4, 10, 9);
@@ -3275,6 +3622,11 @@
   function drawProjectiles() {
     for (var i = 0; i < game.projectiles.length; i++) {
       var pr = game.projectiles[i];
+      // sniper mega-arrow: a big glow under whatever the class draws
+      if (pr.big) {
+        ctx.fillStyle = 'rgba(201,154,58,0.4)';
+        ctx.fillRect(Math.round(pr.x - 6), Math.round(pr.y - 6), 12, 12);
+      }
       // class identity: rogues throw daggers, warriors spinning axes,
       // rangers arrows, the mage keeps his glowing orbs
       if (currentClass === 'rogue') { drawDagger(pr); continue; }
@@ -3372,6 +3724,25 @@
     }
     drawFloor();
     drawWalls();
+    // spike-trap zones sit on the floor, under everything that walks on it
+    for (var tz = 0; tz < game.zones.length; tz++) {
+      var zone = game.zones[tz];
+      var zAlpha = Math.min(0.35, zone.t * 0.35);
+      ctx.fillStyle = 'rgba(125,187,66,' + zAlpha.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(zone.x, zone.y, zone.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(125,187,66,0.7)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // spikes around the rim
+      ctx.fillStyle = '#dde4ec';
+      for (var sp = 0; sp < 8; sp++) {
+        var spa = (Math.PI * 2 / 8) * sp + zone.t;
+        ctx.fillRect(Math.round(zone.x + Math.cos(spa) * (zone.r - 6)) - 1,
+                     Math.round(zone.y + Math.sin(spa) * (zone.r - 6)) - 1, 2, 3);
+      }
+    }
     drawPickups();
     drawParticles();
     // draw enemies sorted by y for a touch of depth
@@ -3380,6 +3751,19 @@
     drawPlayer();
     drawOrbs();
     drawProjectiles();
+    // radiant beam: a fat ray of light that fades out fast
+    for (var rb = 0; rb < game.beams.length; rb++) {
+      var beam = game.beams[rb];
+      var bAlpha = beam.t / 0.25;
+      var bex = beam.x + Math.cos(beam.ang) * 600;
+      var bey = beam.y + Math.sin(beam.ang) * 600;
+      ctx.strokeStyle = 'rgba(255,243,160,' + (bAlpha * 0.5).toFixed(3) + ')';
+      ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.moveTo(beam.x, beam.y); ctx.lineTo(bex, bey); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,' + bAlpha.toFixed(3) + ')';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(beam.x, beam.y); ctx.lineTo(bex, bey); ctx.stroke();
+    }
     drawEdgeEffects();
     // static-burst lightning: jagged 3-segment bolts
     for (var zi2 = 0; zi2 < game.zaps.length; zi2++) {
@@ -3526,9 +3910,12 @@
     ctx.fillStyle = '#00e5ff';
     ctx.fillRect(barX, barY, Math.round(barW * xpRatio), barH);
 
-    // ----- active upgrades (bottom-right) -----
-    var keysList = Object.keys(p.upgradesTaken);
-    var ty = H - 30 - keysList.length * 8;
+    // ----- active upgrades (bottom-right; slides up to clear the ability button) -----
+    var listBase = p.ascendancy ? H - 62 : H - 30;
+    var keysList = Object.keys(p.upgradesTaken).filter(function (uid) {
+      return uid.indexOf('asc_') !== 0; // the ascendancy shows as the button, not a list row
+    });
+    var ty = listBase - keysList.length * 8;
     for (var k = 0; k < keysList.length; k++) {
       var id = keysList[k];
       var def = null;
@@ -3539,7 +3926,36 @@
     }
 
     // ----- current class (below the active upgrades list) -----
-    text('CLASS: ' + currentClass.toUpperCase(), W - 6, H - 30, 6, '#777777', 'right');
+    text('CLASS: ' + currentClass.toUpperCase(), W - 6, listBase, 6, '#777777', 'right');
+
+    // ----- ascendancy ability button (bottom-right, above the XP bar) -----
+    if (p.ascendancy) {
+      var ab = ABILITY_BTN;
+      var ready = p.abilityCd <= 0;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(ab.x, ab.y, ab.w, ab.h);
+      // border pulses in the ascendancy colour when the active is ready
+      ctx.fillStyle = ready ? (game.blinkOn ? p.ascendancy.color : '#ffffff') : '#555566';
+      ctx.fillRect(ab.x, ab.y, ab.w, 1);
+      ctx.fillRect(ab.x, ab.y + ab.h - 1, ab.w, 1);
+      ctx.fillRect(ab.x, ab.y, 1, ab.h);
+      ctx.fillRect(ab.x + ab.w - 1, ab.y, 1, ab.h);
+      var abArt = CARD_ART[p.ascendancy.id];
+      if (abArt) {
+        if (!ready) ctx.globalAlpha = 0.4;
+        drawPixelIcon(abArt, ab.x + 5, ab.y + 5, 2);
+        ctx.globalAlpha = 1;
+      }
+      if (!ready) {
+        // cooldown sweep: dark fill drains downward as it recharges
+        var cdRatio = clamp(p.abilityCd / (p.abilityMaxCd || 1), 0, 1);
+        ctx.fillStyle = 'rgba(0,0,20,0.7)';
+        ctx.fillRect(ab.x + 1, ab.y + 1, ab.w - 2, Math.round((ab.h - 2) * cdRatio));
+        text('' + Math.ceil(p.abilityCd), ab.x + ab.w / 2, ab.y + ab.h / 2 - 4, 8, '#ffffff', 'center');
+      } else {
+        text('SPC', ab.x + ab.w / 2, ab.y + ab.h - 8, 6, p.ascendancy.color, 'center');
+      }
+    }
 
     // ----- boss health bar (only while a boss is alive) -----
     if (game.bossWave && game.boss) {
@@ -3999,9 +4415,9 @@
 
     // ----- damage attribution: a stacked bar (what actually carried the run) -----
     if (game.dmgDealt > 0) {
-      var order = ['shot', 'orb', 'static', 'bomb', 'other'];
-      var labels = { shot: 'SHOTS', orb: 'ORBS', static: 'STATIC', bomb: 'BOMB', other: 'OTHER' };
-      var cols = { shot: '#ffe600', orb: '#00e5ff', static: '#f5f76e', bomb: '#ff9f1c', other: '#9fb0c0' };
+      var order = ['shot', 'orb', 'static', 'bomb', 'ability', 'other'];
+      var labels = { shot: 'SHOTS', orb: 'ORBS', static: 'STATIC', bomb: 'BOMB', ability: 'ABILITY', other: 'OTHER' };
+      var cols = { shot: '#ffe600', orb: '#00e5ff', static: '#f5f76e', bomb: '#ff9f1c', ability: '#ff2dd0', other: '#9fb0c0' };
       var parts = [];
       for (var di = 0; di < order.length; di++) {
         var v = game.dmgBySource[order[di]] || 0;
@@ -4145,6 +4561,63 @@
       }
       // bottom accent stripe in the upgrade's own colour
       ctx.fillStyle = c.upgrade.color;
+      ctx.fillRect(c.x, c.y + c.h - 4, c.w, 4);
+    }
+  }
+
+  // Ascendancy draft: two mutually-exclusive subclass cards after the first
+  // boss falls. Same visual family as level-up cards, but grander.
+  function renderAscend() {
+    renderWorld();
+    renderHUD();
+    ctx.fillStyle = 'rgba(0,0,10,0.8)';
+    ctx.fillRect(0, 0, W, H);
+
+    text((game.lastBossName || 'THE BOSS') + ' FALLS', W / 2, 14, 8, '#ff2d2d', 'center');
+    text('CHOOSE YOUR ASCENDANCY', W / 2, 26, 10, '#FFD700', 'center');
+    if (game.blinkOn) text('THIS CHOICE IS FOREVER', W / 2, 40, 6, '#9b59b6', 'center');
+
+    for (var i = 0; i < game.cards.length; i++) {
+      var c = game.cards[i];
+      var a = c.asc;
+      var hover = mouse.x >= c.x && mouse.x <= c.x + c.w &&
+                  mouse.y >= c.y && mouse.y <= c.y + c.h;
+      var cx2 = c.x + c.w / 2;
+
+      if (hover) {
+        ctx.fillStyle = 'rgba(255,215,0,0.4)';
+        ctx.fillRect(c.x - 4, c.y - 4, c.w + 8, c.h + 8);
+      }
+      // gold frame + dark face
+      ctx.fillStyle = '#FFD700';
+      ctx.fillRect(c.x - 2, c.y - 2, c.w + 4, c.h + 4);
+      ctx.fillStyle = '#141020';
+      ctx.fillRect(c.x, c.y, c.w, c.h);
+
+      // banner in the ascendancy's own colour
+      ctx.fillStyle = a.color;
+      ctx.fillRect(c.x, c.y, c.w, 12);
+      text('ASCENDANCY', cx2, c.y + 3, 6, '#0d0d1a', 'center');
+
+      text(a.name, cx2, c.y + 19, 10, '#ffffff', 'center');
+
+      // framed pixel art
+      var artX = cx2 - 26, artY = c.y + 34;
+      ctx.fillStyle = a.color;
+      ctx.fillRect(artX - 1, artY - 1, 54, 54);
+      ctx.fillStyle = '#0a0a14';
+      ctx.fillRect(artX, artY, 52, 52);
+      var art = CARD_ART[a.id];
+      if (art) drawPixelIcon(art, artX + 2, artY + 2, 4);
+
+      // active (white), cooldown (dim), passive (green)
+      wrapText(a.active, cx2, c.y + 96, 6, '#ffffff', c.w - 12);
+      text('COOLDOWN ' + a.cd + 's', cx2, c.y + 124, 6, '#777799', 'center');
+      wrapText(a.passive, cx2, c.y + 136, 6, '#1dd1a1', c.w - 12);
+      text('SPACE / TAP BUTTON', cx2, c.y + c.h - 14, 6, '#9fb0c0', 'center');
+
+      // bottom accent stripe
+      ctx.fillStyle = a.color;
       ctx.fillRect(c.x, c.y + c.h - 4, c.w, 4);
     }
   }
@@ -4771,6 +5244,9 @@
       drawScanlines();
     } else if (game.gameState === 'levelup') {
       renderLevelUp();
+      drawScanlines();
+    } else if (game.gameState === 'ascend') {
+      renderAscend();
       drawScanlines();
     } else if (game.gameState === 'waveintro') {
       renderWaveIntro();

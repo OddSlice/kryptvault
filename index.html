@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.4';
+  var GAME_VERSION = '0.4a';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -1414,14 +1414,25 @@
   function fetchLeaderboard() {
     if (leaderboard.state === 'loading') return;
     leaderboard.state = 'loading';
-    var q = SB_URL + '?select=name,disc,wave,kills,cls&order=wave.desc,kills.desc&limit=10';
+    // fetch deep, then keep only each player's best run so one grinder
+    // can't occupy half the board
+    var q = SB_URL + '?select=name,disc,wave,kills,cls&order=wave.desc,kills.desc&limit=80';
     q += leaderboard.mode === 'daily'
        ? '&mode=eq.daily&day=eq.' + todayISO()
        : '&mode=eq.normal';
     fetch(q, {
       headers: { apikey: SB_KEY }
     }).then(function (r) { return r.json(); }).then(function (rows) {
-      leaderboard.rows = Array.isArray(rows) ? rows : [];
+      var best = [], seen = {};
+      if (Array.isArray(rows)) {
+        for (var i = 0; i < rows.length && best.length < 10; i++) {
+          var tag = rows[i].name + '#' + (rows[i].disc || '');
+          if (seen[tag]) continue;
+          seen[tag] = true;
+          best.push(rows[i]);
+        }
+      }
+      leaderboard.rows = best;
       leaderboard.state = 'loaded';
       leaderboard.fetchedAt = Date.now();
     }).catch(function () {

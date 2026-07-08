@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.4a';
+  var GAME_VERSION = '0.5';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -881,28 +881,30 @@
   // UPGRADE DEFINITIONS
   // ---------------------------------------------------------------------------
   var UPGRADES = [
-    { id: 'multishot', name: 'MULTI-SHOT', desc: '+1 projectile per shot', con: '-15% DAMAGE',     detail: 'STACKS - MAX 5 SHOTS',   color: '#ff6b6b' },
+    { id: 'multishot', name: 'MULTI-SHOT', desc: '+1 projectile per shot', con: '-12% DAMAGE',     detail: 'STACKS - MAX 5 SHOTS',   color: '#ff6b6b' },
     { id: 'atkspeed',  name: 'ATTACK SPD', desc: 'Fire 0.1s faster',       con: 'SHOTS 10% SLOWER', detail: 'STACKS - MIN 0.2S',     color: '#feca57' },
     { id: 'damage',    name: 'DMG BOOST',  desc: '+15 damage per shot',    con: 'FIRE 0.05s SLOWER', detail: 'STACKS',               color: '#ff9ff3' },
-    { id: 'health',    name: 'HEALTH UP',  desc: '+30 max HP, heal 30',    con: '-5 MOVE SPEED',   detail: 'STACKS',                 color: '#1dd1a1' },
+    { id: 'health',    name: 'HEALTH UP',  desc: '+30 max HP, heal half your missing HP', con: '-5 MOVE SPEED', detail: 'STACKS',    color: '#1dd1a1' },
     { id: 'movespeed', name: 'MOVE SPD',   desc: '+20 move speed',         con: '-10 MAX HP',      detail: 'STACKS',                 color: '#54a0ff' },
     { id: 'pierce',    name: 'PIERCE',     desc: 'Shots pierce +1 foe',    con: '-10% DAMAGE',     detail: 'STACKS',                 color: '#48dbfb' },
     { id: 'vampire',   name: 'VAMPIRE',    desc: 'Heal 3 HP per kill',     con: '-15 MAX HP',      detail: 'STACKS',                 color: '#ee5253' },
-    { id: 'xpmagnet',  name: 'XP MAGNET',  desc: '+20% XP from kills',     con: 'FOES +8% SPEED',  detail: 'STACKS',                 color: '#5f27cd' },
-    { id: 'shotgun',   name: 'SHOTGUN',    desc: '5-shot 60deg blast',     con: 'FIRE 0.1s SLOWER', detail: 'STACKS: +2 PELLETS',    color: '#ff9f1c' },
+    { id: 'xpmagnet',  name: 'XP MAGNET',  desc: '+20% XP from kills',     con: 'FOES +4% SPEED',  detail: 'STACKS',                 color: '#5f27cd' },
+    { id: 'shotgun',   name: 'SHOTGUN',    desc: '4 heavy pellets knock foes back', con: 'FIRE 0.1s SLOWER', detail: 'STACKS: +1 PELLET', color: '#ff9f1c' },
     { id: 'homing',    name: 'HOMING SHOT',desc: 'Shots seek foes',        con: 'SHOTS 15% SLOWER', detail: 'STACKS: STRONGER SEEK', color: '#2ec4b6' },
-    { id: 'shield',    name: 'ORBIT SHIELD',desc:'4 orbs circle you',      con: '-8 MOVE SPEED',   detail: 'STACKS: +1 ORB',         color: '#00e5ff' },
+    { id: 'shield',    name: 'ORBIT SHIELD',desc:'5 fast orbs circle you', con: '-8 MOVE SPEED',   detail: 'STACKS: +1 ORB',         color: '#00e5ff' },
     { id: 'frost',     name: 'FROST SHOTS', desc: 'Hits slow foes 30%',    con: '-10% DAMAGE',     detail: 'STACKS: STRONGER SLOW',  color: '#8fd8ff' },
-    { id: 'ricochet',  name: 'RICOCHET',    desc: 'Shots bounce to a foe', con: '-10% DAMAGE',     detail: 'STACKS: +1 BOUNCE',      color: '#ffb347' },
-    { id: 'regen',     name: 'REGEN',       desc: '+1 HP per second',      con: '-10% DAMAGE',     detail: 'STACKS',                 color: '#7bed9f' },
+    { id: 'crit',      name: 'KEEN EDGE',   desc: '+10% crit chance, crits deal 2x', con: '-5% DAMAGE', detail: 'STACKS - MAX 60%',  color: '#ffb347' },
+    { id: 'armor',     name: 'IRON SKIN',   desc: 'Take 10% less damage',  con: '-5 MOVE SPEED',   detail: 'STACKS - MAX 50%',       color: '#7bed9f' },
     { id: 'static',    name: 'STATIC BURST',desc: 'Zap 3 foes for 70 every 2.5s', con: 'FIRE 0.05s SLOWER', detail: 'STACKS: +1 TARGET, +15 DMG', color: '#f5f76e' },
+    { id: 'velocity',  name: 'VELOCITY',    desc: '+25% projectile speed', con: '-10 MAX HP',      detail: 'STACKS',                 color: '#c8f7ff' },
+    { id: 'heavyshot', name: 'HEAVY SHOT',  desc: 'Bigger projectiles',    con: 'FIRE 0.05s SLOWER', detail: 'STACKS',               color: '#d9a066' },
     // cursed upgrades: a strong boost with a permanent downside
-    { id: 'greed',       name: 'GREED',        desc: '+100% coins',   con: 'FOES +30% HP',      detail: 'PAIRS WITH FORTUNE PERK', color: '#FFD700', cursed: true },
-    { id: 'darkpact',    name: 'DARK PACT',    desc: '+1 projectile', con: 'CULTISTS HUNT YOU', detail: 'STACKS - MAX 6 SHOTS',    color: '#9b59b6', cursed: true },
-    { id: 'bloodrage',   name: 'BLOOD RAGE',   desc: '+25 damage',    con: 'FOES +25% SPEED',   detail: 'STACKS',                  color: '#e74c3c', cursed: true },
-    { id: 'glasscannon', name: 'GLASS CANNON', desc: '+60% damage',   con: '-30 MAX HP',        detail: 'STACKS',                  color: '#ecf0f1', cursed: true },
+    { id: 'lucky',       name: 'LUCKY CHARM',  desc: 'Pickups drop twice as often', con: 'FOES +20% HP', detail: 'STACKS',           color: '#FFD700', cursed: true },
+    { id: 'darkpact',    name: 'DARK PACT',    desc: 'Kills explode for 30 dmg', con: 'CULTISTS HUNT YOU', detail: 'STACKS: +15 DMG', color: '#9b59b6', cursed: true },
+    { id: 'executioner', name: 'EXECUTIONER',  desc: 'Crits deal +0.5x more', con: 'FOES +10% SPEED', detail: 'STACKS',              color: '#e74c3c', cursed: true },
+    { id: 'glasscannon', name: 'GLASS CANNON', desc: '+25% damage',   con: '-20 MAX HP',        detail: 'STACKS',                  color: '#ecf0f1', cursed: true },
     { id: 'hastepact',   name: 'HASTE PACT',   desc: 'Move & fire 15% faster', con: 'FOES SPAWN 15% FASTER', detail: 'STACKS', color: '#ff8c00', cursed: true },
-    { id: 'bloodaltar',  name: 'BLOOD ALTAR',  desc: '+40% damage',   con: 'HEALING HALVED',    detail: 'STACKS',                  color: '#8b0000', cursed: true }
+    { id: 'retribution', name: 'RETRIBUTION',  desc: 'Foes that hit you take 60 dmg', con: '-15 MAX HP', detail: 'STACKS: +40 DMG',  color: '#8b0000', cursed: true }
   ];
 
   // ---------------------------------------------------------------------------
@@ -1092,10 +1094,11 @@
 
   // Evolutions: rare combo cards offered once both base upgrades are owned.
   var EVOLUTIONS = [
-    { id: 'seekerswarm', name: 'SEEKER SWARM', desc: '+4 pellets, pellets hit harder', con: 'SHOTS 10% SLOWER', detail: 'SHOTGUN + HOMING', color: '#ff2dd0', evolution: true, needs: ['shotgun', 'homing'] },
+    { id: 'seekerswarm', name: 'SEEKER SWARM', desc: '+3 pellets, pellets hit harder', con: 'SHOTS 10% SLOWER', detail: 'SHOTGUN + HOMING', color: '#ff2dd0', evolution: true, needs: ['shotgun', 'homing'] },
     { id: 'bladeorbit',  name: 'BLADE ORBIT',  desc: '+2 orbs, 40 dmg, spin faster',  con: '-5 MOVE SPEED',   detail: 'SHIELD + DMG BOOST', color: '#ff4444', evolution: true, needs: ['shield', 'damage'] },
     { id: 'railgun',     name: 'RAILGUN',      desc: 'Infinite pierce, +25 dmg', con: 'FIRE 0.3s SLOWER', detail: 'PIERCE + DMG BOOST', color: '#00ffcc', evolution: true, needs: ['pierce', 'damage'] },
-    { id: 'bulletstorm', name: 'BULLET STORM', desc: '+1 shot past the cap, fire faster', con: '-10% DAMAGE',  detail: 'MULTI-SHOT + ATK SPD', color: '#ff6bff', evolution: true, needs: ['multishot', 'atkspeed'] }
+    { id: 'bulletstorm', name: 'BULLET STORM', desc: '+1 shot past the cap, fire faster', con: '-10% DAMAGE',  detail: 'MULTI-SHOT + ATK SPD', color: '#ff6bff', evolution: true, needs: ['multishot', 'atkspeed'] },
+    { id: 'deathseeker', name: 'DEATHSEEKER',  desc: '+15% crit, crits bounce to a foe', con: 'SHOTS 10% SLOWER', detail: 'KEEN EDGE + HOMING', color: '#ff2d6b', evolution: true, needs: ['crit', 'homing'] }
   ];
 
   // ---------------------------------------------------------------------------
@@ -1218,18 +1221,18 @@
       '....CC......', '.........C..', '.C..........', '.....WW...CC',
       '....WWWW....', 'CC..WWWW....', '.....WW.....', '.........C..',
       '.C..........', '......CC....', '............', '............'] },
-    greed: { pal: { G: '#FFD700', W: '#fff6c0', D: '#aa8800' }, rows: [
-      '...GGGGGG...', '..GWGGGGGG..', '..GGGGGGGG..', '...DDDDDD...',
-      '...GGGGGG...', '..GWGGGGGG..', '..GGGGGGGG..', '...DDDDDD...',
-      '...GGGGGG...', '..GWGGGGGG..', '..GGGGGGGG..', '...DDDDDD...'] },
+    lucky: { pal: { G: '#FFD700', W: '#fff6c0', D: '#aa8800' }, rows: [
+      '..GG....GG..', '.GWWG..GWWG.', '.GWGG..GGWG.', '..GGGGGGGG..',
+      '..GG....GG..', '.GWWG..GWWG.', '.GGGG..GGGG.', '..GGGGGGGG..',
+      '.....DD.....', '.....DD.....', '....DDDD....', '............'] },
     darkpact: { pal: { H: '#5b2c8e', L: '#7d3cc8', E: '#ff44aa' }, rows: [
       '....LLLL....', '...LLLLLL...', '..LLLLLLLL..', '..LHHHHHHL..',
       '..HHHHHHHH..', '..HEH..HEH..', '..HHHHHHHH..', '..HHHHHHHH..',
       '.HHHHHHHHHH.', '.HHHHHHHHHH.', 'HHHHHHHHHHHH', '............'] },
-    bloodrage: { pal: { A: '#c0c8d0', B: '#8a5a2b', R: '#ff2d2d' }, rows: [
-      '.AAA....AAA.', 'AAAA....AAAA', 'AAAAA..AAAAA', 'AAAABBBBAAAA',
-      '.AAABBBBAAA.', '....BB......', '....BB......', '....BB......',
-      '....BB..R...', '....BB.RRR..', '....BB..R...', '............'] },
+    executioner: { pal: { A: '#c0c8d0', B: '#8a5a2b', R: '#e74c3c' }, rows: [
+      '.AAAA.......', 'AAAAAA......', 'AARAAA......', 'AAAAAABB....',
+      '.AAAA..BB...', '........BB..', '.........BB.', '..........BB',
+      '....R.......', '...RRR..R...', '....R..RRR..', '........R...'] },
     glasscannon: { pal: { W: '#dde4ec', L: '#aef3ff', C: '#ffffff' }, rows: [
       '....WWWW....', '.....WW.....', '....WLLW....', '...WLLLLW...',
       '..WLLCLLLW..', '..WLLC.LLW..', '..WLLLCLLW..', '..WLLLLCLW..',
@@ -1246,14 +1249,14 @@
       '.....CC.....', '.C...CC...C.', '..C..CC..C..', '...C.CC.C...',
       '....CCCC....', 'CCCCCWWCCCCC', 'CCCCCWWCCCCC', '....CCCC....',
       '...C.CC.C...', '..C..CC..C..', '.C...CC...C.', '.....CC.....'] },
-    ricochet: { pal: { O: '#ffb347', W: '#ffffff' }, rows: [
-      'OO..........', '.OO.........', '..OO.......W', '...OO.....WW',
-      '....OO...OWW', '.....OO..O..', '......OOO...', '.......O....',
-      '............', '............', '............', '............'] },
-    regen: { pal: { R: '#ff2d2d', G: '#7bed9f' }, rows: [
-      '..RR....RR..', '.RRRR..RRRR.', 'RRRRRRRRRRRR', 'RRRRRRRRRRRR',
-      '.RRRRRRRRRR.', '..RRRRRRRR..', '...RRRRRR...', '....RRRR....',
-      '.....RR..G..', '........GGG.', '.........G..', '............'] },
+    crit: { pal: { O: '#ffb347', W: '#ffffff', R: '#ff2d2d' }, rows: [
+      '.....W......', '.....W......', '..W..O..W...', '...W.O.W....',
+      '.....O......', 'WWOOORROOOWW', '.....O......', '...W.O.W....',
+      '..W..O..W...', '.....W......', '.....W......', '............'] },
+    armor: { pal: { G: '#7bed9f', D: '#3a8a5a', W: '#ffffff' }, rows: [
+      '.GGGGGGGGGG.', '.GWGGGGGGGG.', '.GGGGDDGGGG.', '.GGGDDDDGGG.',
+      '.GGGGDDGGGG.', '.GGGGDDGGGG.', '..GGGGGGGG..', '..GGGGGGGG..',
+      '...GGGGGG...', '....GGGG....', '.....GG.....', '............'] },
     static: { pal: { Y: '#f5f76e', W: '#ffffff' }, rows: [
       'W...........', '....YYYY....', '...YYYY.....', '..YYYY....W.',
       '.YYYYYYYY...', '....YYYY....', '...YYYY.....', 'W..YYY......',
@@ -1262,10 +1265,22 @@
       'O....O......', 'OO...OO.....', '.OO...OO....', '..OO...OO...',
       '...OO...OO..', '....OO...OO.', '....OO...OO.', '...OO...OO..',
       '..OO...OO...', '.OO...OO....', 'OO...OO.....', 'O....O......'] },
-    bloodaltar: { pal: { A: '#8b95a5', R: '#ff2d2d' }, rows: [
-      '.....RR.....', '....RRRR....', '....RRRR....', '.....RR.....',
-      '............', '..AAAAAAAA..', '..AAAAAAAA..', '....AAAA....',
-      '....AAAA....', '...AAAAAA...', '.AAAAAAAAAA.', 'AAAAAAAAAAAA'] },
+    retribution: { pal: { A: '#8b95a5', R: '#8b0000', W: '#dde4ec' }, rows: [
+      '.....W......', '..W..W..W...', '..W.AAA.W...', '...AAAAA....',
+      'WW.AARAA.WW.', '...AARAA....', '..WAAAAAW...', '...AAAAA....',
+      '..W..W..W...', '.....W......', '............', '............'] },
+    velocity: { pal: { C: '#c8f7ff', W: '#ffffff' }, rows: [
+      '............', '............', 'C..C..WW....', '.C..C.WWWW..',
+      'C..C..WWWWWW', '.C..C.WWWWWW', 'C..C..WWWWWW', '.C..C.WWWW..',
+      'C..C..WW....', '............', '............', '............'] },
+    heavyshot: { pal: { B: '#d9a066', D: '#8a5a2b', W: '#ffe9c0' }, rows: [
+      '............', '....BBBB....', '..BBBBBBBB..', '..BWBBBBBB..',
+      '.BWWBBBBBBB.', '.BWBBBBBBBB.', '.BBBBBBBBBB.', '.BBBBBBBBDB.',
+      '..BBBBBBDD..', '..BBBBBBBB..', '....BBBB....', '............'] },
+    deathseeker: { pal: { P: '#ff2d6b', W: '#ffffff' }, rows: [
+      '.....P......', '.....P......', '..P.WWW.P...', '...WWWWW....',
+      '..WWPWPWW...', 'PPWWWWWWWPP.', '..WWWWWWW...', '...WW.WW....',
+      '..P..P..P...', '.....P......', '.....P......', '............'] },
     railgun: { pal: { G: '#556677', T: '#00ffcc', W: '#ffffff' }, rows: [
       '............', '.GG.........', '.GGG........', '.GGGTTTTTTTT',
       '.GGGWWWWWWWW', '.GGGTTTTTTTT', '.GGG........', '.GG.........',
@@ -1682,6 +1697,7 @@
     zaps: [],             // static-burst lightning visuals
     beams: [],            // radiant-beam visuals (light mage active)
     zones: [],            // spike-trap damage zones (trapper active)
+    pactBooms: [],        // dark pact: queued kill-explosions
     spawnHaste: 1,        // haste pact speeds up spawning
     freezeTimer: 0,       // chrono pickup freezes enemies
     coinsEarned: 0,       // coins banked at the end of the run
@@ -1732,6 +1748,7 @@
       bladeOrbit: 0,
       railgun: 0,
       bulletstorm: 0,
+      deathseeker: 0,
       frost: 0,          // slow-on-hit level
       ricochet: 0,       // bounce count
       regen: 0,          // HP per second
@@ -1742,6 +1759,13 @@
       orbs: [],          // orbiting shield orbs
       orbRadius: 40,
       orbSpeed: 0,       // radians/sec
+      // v0.5 card stats
+      critMult: 2,       // crit damage multiplier (executioner raises it)
+      projSize: 0,       // heavy shot stacks (bigger hitbox)
+      armor: 0,          // iron skin: fraction of damage ignored
+      lucky: 0,          // lucky charm: pickup drop multiplier stacks
+      pactLvl: 0,        // dark pact: kills explode
+      retribution: 0,    // thorns stacks
       // ascendancy (subclass drafted after the first boss)
       ascendancy: null,  // the chosen ASCENDANCIES entry
       abilityCd: 0,      // seconds until the active can fire again
@@ -1758,9 +1782,9 @@
   // Rebuild the orbiting-shield orbs from the current shield level.
   function rebuildOrbs() {
     var p = game.player;
-    var count = 3 + p.shield;                              // 1st pick = 4 orbs, +1 each after
+    var count = 4 + p.shield;                              // 1st pick = 5 orbs, +1 each after
     if (p.bladeOrbit) count += 2;                          // evolution: +2 orbs
-    p.orbSpeed = (150 + (p.shield - 1) * 35) * Math.PI / 180; // 150deg/s, +35 per extra pick
+    p.orbSpeed = (190 + (p.shield - 1) * 35) * Math.PI / 180; // 190deg/s, +35 per extra pick
     if (p.bladeOrbit) p.orbSpeed *= 1.5;                   // evolution: faster spin
     var orbs = [];
     for (var i = 0; i < count; i++) {
@@ -1795,6 +1819,7 @@
     game.zaps = [];
     game.beams = [];
     game.zones = [];
+    game.pactBooms = [];
     game.spawnHaste = 1;
     game.freezeTimer = 0;
     game.coinsEarned = 0;
@@ -2073,9 +2098,9 @@
     if (p.ascendancy && p.ascendancy.id === 'berserker' && p.hp < p.maxHp * 0.5) {
       dmg *= 1.35;
     }
-    // assassin passive: crits hit for double
+    // crits: chance from Keen Edge/Assassin, multiplier from Executioner
     var crit = p.critChance > 0 && Math.random() < p.critChance;
-    if (crit) dmg *= 2;
+    if (crit) dmg *= p.critMult;
     game.projectiles.push({
       x: p.x, y: p.y,
       vx: Math.cos(ang) * p.shotSpeed,
@@ -2083,7 +2108,8 @@
       damage: dmg,
       crit: crit,
       pierce: p.railgun ? 99 : p.pierce,
-      bounces: p.ricochet,
+      // deathseeker evolution: crits ricochet to another foe
+      bounces: (crit && p.deathseeker) ? 1 : p.ricochet,
       // homing strength: 0.08 base, +0.04 per extra pick; mage has an
       // innate 0.06 without the upgrade.
       homing: p.homing > 0 ? (0.08 + (p.homing - 1) * 0.04) : (p.homingBase || 0),
@@ -2104,15 +2130,18 @@
       spawnProjectile(p, baseAng + (i - (n - 1) / 2) * spread, p.damage);
     }
 
-    // shotgun blast: 5 pellets over 60deg, +2 pellets & +10deg per extra pick.
-    // Seeker Swarm evolution: +4 pellets that hit at 0.8x instead of 0.6x.
+    // shotgun blast: 4 heavy knockback pellets over 50deg, +1 pellet & +10deg
+    // per extra pick. Seeker Swarm evolution: +3 pellets at 0.85x.
     if (p.shotgun > 0) {
-      var pellets = 5 + (p.shotgun - 1) * 2 + (p.seekerSwarm ? 4 : 0);
-      var arc = (60 + (p.shotgun - 1) * 10) * Math.PI / 180;
-      var pfac = p.seekerSwarm ? 0.8 : 0.6;
+      var pellets = 4 + (p.shotgun - 1) + (p.seekerSwarm ? 3 : 0);
+      var arc = (50 + (p.shotgun - 1) * 10) * Math.PI / 180;
+      var pfac = p.seekerSwarm ? 0.85 : 0.75;
       for (var k = 0; k < pellets; k++) {
         var t = pellets > 1 ? (k / (pellets - 1) - 0.5) : 0;
         spawnProjectile(p, baseAng + t * arc, p.damage * pfac);
+        var pel = game.projectiles[game.projectiles.length - 1];
+        pel.kb = 1;      // pellets shove enemies back
+        pel.fat = 1;     // and are drawn/collided fatter
       }
     }
 
@@ -2175,12 +2204,14 @@
     switch (u.id) {
       // every upgrade carries a con; clamps keep heavy stacking survivable
       case 'multishot': p.projectiles = Math.min(5, p.projectiles + 1);
-                        p.damage = Math.max(5, Math.round(p.damage * 0.85)); break;
+                        p.damage = Math.max(5, Math.round(p.damage * 0.88)); break;
       case 'atkspeed':  p.attackCooldown = Math.max(0.2, p.attackCooldown - 0.1);
                         p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;
       case 'damage':    p.damage += 15;
                         p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
-      case 'health':    p.maxHp += 30; p.hp = Math.min(p.maxHp, p.hp + Math.round(30 * p.healMult));
+      case 'health':    p.maxHp += 30;
+                        // heal half of what's missing — a real panic button
+                        p.hp = Math.min(p.maxHp, p.hp + Math.round((p.maxHp - p.hp) * 0.5 * p.healMult));
                         p.speed = Math.max(40, p.speed - 5); break;
       case 'movespeed': p.speed += 20;
                         p.maxHp = Math.max(30, p.maxHp - 10);
@@ -2191,33 +2222,39 @@
                         p.maxHp = Math.max(30, p.maxHp - 15);
                         p.hp = Math.min(p.hp, p.maxHp); break;
       case 'xpmagnet':  p.xpMult *= 1.2;
-                        game.curseSpeedMult *= 1.08; break;
+                        game.curseSpeedMult *= 1.04; break;
       case 'shotgun':   p.shotgun += 1;
                         p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.1); break;
       case 'homing':    p.homing += 1;
                         p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.85)); break;
       case 'shield':    p.shield += 1; rebuildOrbs();
                         p.speed = Math.max(40, p.speed - 8); break;
-      // cursed upgrades — the downside is permanent for the rest of the run
-      case 'greed':       p.coinMult *= 2; game.curseHpMult *= 1.3; break;
-      case 'darkpact':    p.projectiles = Math.min(6, p.projectiles + 1); game.cultistLevel++; break;
-      case 'bloodrage':   p.damage += 25; game.curseSpeedMult *= 1.25; break;
-      case 'glasscannon': p.damage = Math.round(p.damage * 1.6);
-                          p.maxHp = Math.max(30, p.maxHp - 30);
-                          p.hp = Math.min(p.hp, p.maxHp); break;
       case 'frost':     p.frost += 1;
                         p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
-      case 'ricochet':  p.ricochet += 1;
-                        p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
-      case 'regen':     p.regen += 1;
-                        p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
+      case 'crit':      p.critChance = Math.min(0.6, p.critChance + 0.10);
+                        p.damage = Math.max(5, Math.round(p.damage * 0.95)); break;
+      case 'armor':     p.armor = Math.min(0.5, p.armor + 0.10);
+                        p.speed = Math.max(40, p.speed - 5); break;
       case 'static':    p.staticLvl += 1;
                         p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
+      case 'velocity':  p.shotSpeed = Math.round(p.shotSpeed * 1.25);
+                        p.maxHp = Math.max(30, p.maxHp - 10);
+                        p.hp = Math.min(p.hp, p.maxHp); break;
+      case 'heavyshot': p.projSize += 1;
+                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
+      // cursed upgrades — the downside is permanent for the rest of the run
+      case 'lucky':       p.lucky += 1; game.curseHpMult *= 1.2; break;
+      case 'darkpact':    p.pactLvl += 1; game.cultistLevel++; break;
+      case 'executioner': p.critMult += 0.5; game.curseSpeedMult *= 1.10; break;
+      case 'glasscannon': p.damage = Math.round(p.damage * 1.25);
+                          p.maxHp = Math.max(30, p.maxHp - 20);
+                          p.hp = Math.min(p.hp, p.maxHp); break;
       case 'hastepact': p.speed = Math.round(p.speed * 1.15);
                         p.attackCooldown = Math.max(0.2, p.attackCooldown * 0.87);
                         game.spawnHaste *= 1.15; break;
-      case 'bloodaltar': p.damage = Math.round(p.damage * 1.4);
-                        p.healMult *= 0.5; break;
+      case 'retribution': p.retribution += 1;
+                        p.maxHp = Math.max(30, p.maxHp - 15);
+                        p.hp = Math.min(p.hp, p.maxHp); break;
       // evolutions
       case 'seekerswarm': p.seekerSwarm = 1;
                           p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;
@@ -2229,11 +2266,14 @@
                           p.projectiles = Math.min(7, p.projectiles + 1);
                           p.attackCooldown = Math.max(0.15, p.attackCooldown - 0.1);
                           p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
+      case 'deathseeker': p.deathseeker = 1;
+                          p.critChance = Math.min(0.75, p.critChance + 0.15);
+                          p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;
     }
     if (u.evolution) unlockAch('evolved');
     if (u.cursed) {
       var curses = 0;
-      var cursedIds = ['greed', 'darkpact', 'bloodrage', 'glasscannon'];
+      var cursedIds = ['lucky', 'darkpact', 'executioner', 'glasscannon'];
       for (var ci = 0; ci < cursedIds.length; ci++) if (p.upgradesTaken[cursedIds[ci]]) curses++;
       if (curses >= 4) unlockAch('curse_hoarder');
     }
@@ -2791,7 +2831,18 @@
           e.kx = kdx * 120;
           e.ky = kdy * 120;
         }
-        damagePlayer(e.contact, true);
+        // retribution: melee hits that land burn the attacker
+        if (damagePlayer(e.contact, true) && p.retribution > 0) {
+          var thorns = 60 + (p.retribution - 1) * 40;
+          e.hp -= thorns;
+          addDmg(thorns, 'pact');
+          spawnFloatText(e.x, e.y, '' + thorns, '#8b0000');
+          e.hitFlash = 0.08;
+          if (e.hp <= 0) {
+            if (e.isBoss) killBoss(j, e); else killEnemy(j, e);
+            continue;
+          }
+        }
       }
     }
 
@@ -2813,6 +2864,28 @@
       }
       if (sh.x < -8 || sh.x > W + 8 || sh.y < -8 || sh.y > H + 8) {
         game.enemyShots.splice(es, 1);
+      }
+    }
+
+    // ----- dark pact: kill-explosions queued last tick detonate now -----
+    if (game.pactBooms.length) {
+      var booms = game.pactBooms;
+      game.pactBooms = []; // chained kills queue into the fresh array
+      for (var pb = 0; pb < booms.length; pb++) {
+        var boom = booms[pb];
+        game.shockwaves.push({ x: boom.x, y: boom.y, t: 0.2, color: '#9b59b6' });
+        for (var be = game.enemies.length - 1; be >= 0; be--) {
+          var bEn = game.enemies[be];
+          var bdx = bEn.x - boom.x, bdy = bEn.y - boom.y;
+          if (bdx * bdx + bdy * bdy < 30 * 30) {
+            bEn.hp -= boom.dmg;
+            addDmg(boom.dmg, 'pact');
+            bEn.hitFlash = 0.08;
+            if (bEn.hp <= 0) {
+              if (bEn.isBoss) killBoss(be, bEn); else killEnemy(be, bEn);
+            }
+          }
+        }
       }
     }
 
@@ -2877,12 +2950,20 @@
       for (var ei = game.enemies.length - 1; ei >= 0; ei--) {
         var en = game.enemies[ei];
         if (proj.hitSet.indexOf(en) !== -1) continue;
-        if (Math.abs(proj.x - en.x) < (en.w / 2 + 3) &&
-            Math.abs(proj.y - en.y) < (en.h / 2 + 3)) {
+        // heavy shot stacks and fat shotgun pellets widen the hitbox
+        var pad = 3 + p.projSize * 2 + (proj.fat ? 2 : 0);
+        if (Math.abs(proj.x - en.x) < (en.w / 2 + pad) &&
+            Math.abs(proj.y - en.y) < (en.h / 2 + pad)) {
           en.hp -= proj.damage;
           addDmg(proj.damage, 'shot');
           spawnFloatText(en.x, en.y, '' + Math.round(proj.damage), proj.crit ? '#ff9f1c' : '#ffe600');
           en.hitFlash = 0.08;
+          // shotgun pellets shove non-boss enemies back
+          if (proj.kb && !en.isBoss) {
+            var kbLen = Math.sqrt(proj.vx * proj.vx + proj.vy * proj.vy) || 1;
+            en.kx = (proj.vx / kbLen) * 140;
+            en.ky = (proj.vy / kbLen) * 140;
+          }
           // frost shots chill whatever they hit
           if (p.frost > 0) {
             en.slowT = 1.0;
@@ -2984,6 +3065,11 @@
     if (game.score === 1) unlockAch('first_blood');
     game.hitStop = Math.max(game.hitStop, 0.03); // tiny punch on every kill
     maybeDropPickup(en.x, en.y);
+    // dark pact: kills detonate (queued — resolved next tick so we never
+    // recurse into the enemies array mid-splice)
+    if (p.pactLvl > 0 && !en.isBoss) {
+      game.pactBooms.push({ x: en.x, y: en.y, dmg: 30 + (p.pactLvl - 1) * 15 });
+    }
     game.enemies.splice(index, 1);
     // splitters burst into two fast minis
     if (en.type === 'splitter' && game.enemies.length < 198) {
@@ -3023,6 +3109,8 @@
   function maybeDropPickup(x, y) {
     if (game.pickups.length >= 6) return;
     var roll = Math.random();
+    // lucky charm: each stack halves the roll = doubles every drop chance
+    roll /= Math.pow(2, game.player.lucky || 0);
     var type = null;
     if (roll < 0.04) type = 'potion';
     else if (roll < 0.055) type = 'bomb';
@@ -3100,9 +3188,10 @@
       return;
     }
     // warriors shrug off 12% of all incoming damage (innate armor);
-    // the juggernaut ascendancy stacks another 10% on top
+    // iron skin stacks and the juggernaut ascendancy multiply on top
     if (currentClass === 'warrior') amount = amount * 0.88;
     if (p.ascendDR > 0) amount = amount * (1 - p.ascendDR);
+    if (p.armor > 0) amount = amount * (1 - p.armor);
     amount = Math.max(1, Math.round(amount));
     p.hp -= amount;
     p.invuln = 0.5;
@@ -3114,6 +3203,7 @@
       p.hp = 0;
       endRun();
     }
+    return true; // a real hit landed (callers use this for retribution)
   }
 
   // An enemy survived 1.5s at a screen edge: detonate it.
@@ -3638,6 +3728,13 @@
         ctx.fillStyle = 'rgba(201,154,58,0.4)';
         ctx.fillRect(Math.round(pr.x - 6), Math.round(pr.y - 6), 12, 12);
       }
+      // heavy shot / fat pellets: soft halo signals the bigger hitbox
+      var halo = game.player.projSize + (pr.fat ? 1 : 0);
+      if (halo > 0) {
+        var hr = 3 + halo * 2;
+        ctx.fillStyle = 'rgba(217,160,102,0.35)';
+        ctx.fillRect(Math.round(pr.x - hr), Math.round(pr.y - hr), hr * 2, hr * 2);
+      }
       // class identity: rogues throw daggers, warriors spinning axes,
       // rangers arrows, the mage keeps his glowing orbs
       if (currentClass === 'rogue') { drawDagger(pr); continue; }
@@ -3921,23 +4018,31 @@
     ctx.fillStyle = '#00e5ff';
     ctx.fillRect(barX, barY, Math.round(barW * xpRatio), barH);
 
-    // ----- active upgrades (bottom-right; slides up to clear the ability button) -----
-    var listBase = p.ascendancy ? H - 62 : H - 30;
+    // ----- active upgrades: horizontal icon row above the XP bar -----
+    // (was a right-side text list; icons keep the battlefield visible)
     var keysList = Object.keys(p.upgradesTaken).filter(function (uid) {
-      return uid.indexOf('asc_') !== 0; // the ascendancy shows as the button, not a list row
+      return uid.indexOf('asc_') !== 0; // the ascendancy shows as the button, not an icon
     });
-    var ty = listBase - keysList.length * 8;
+    var ix = 52, iy = H - 28, iMaxX = W - 56;
     for (var k = 0; k < keysList.length; k++) {
       var id = keysList[k];
-      var def = null;
-      for (var u = 0; u < UPGRADES.length; u++) if (UPGRADES[u].id === id) def = UPGRADES[u];
-      for (var ev = 0; ev < EVOLUTIONS.length; ev++) if (EVOLUTIONS[ev].id === id) def = EVOLUTIONS[ev];
-      var label = (def ? def.name : id) + ' x' + p.upgradesTaken[id];
-      text(label, W - 6, ty + k * 8, 6, '#bbbbbb', 'right');
+      if (ix > iMaxX) { ix = 52; iy -= 15; } // wrap to a row above when full
+      var art = CARD_ART[id];
+      if (art) {
+        drawPixelIcon(art, ix, iy, 1);
+      } else {
+        var def = null;
+        for (var u = 0; u < UPGRADES.length; u++) if (UPGRADES[u].id === id) def = UPGRADES[u];
+        for (var ev = 0; ev < EVOLUTIONS.length; ev++) if (EVOLUTIONS[ev].id === id) def = EVOLUTIONS[ev];
+        ctx.fillStyle = def ? def.color : '#888888';
+        ctx.fillRect(ix + 1, iy + 1, 10, 10);
+      }
+      text('x' + p.upgradesTaken[id], ix + 13, iy + 4, 6, '#bbbbbb');
+      ix += 28;
     }
 
-    // ----- current class (below the active upgrades list) -----
-    text('CLASS: ' + currentClass.toUpperCase(), W - 6, listBase, 6, '#777777', 'right');
+    // ----- current class (right end of the LVL line, clear of the ability button) -----
+    text('CLASS: ' + currentClass.toUpperCase(), W - 46, H - 24, 6, '#777777', 'right');
 
     // ----- ascendancy ability button (bottom-right, above the XP bar) -----
     if (p.ascendancy) {
@@ -4426,9 +4531,9 @@
 
     // ----- damage attribution: a stacked bar (what actually carried the run) -----
     if (game.dmgDealt > 0) {
-      var order = ['shot', 'orb', 'static', 'bomb', 'ability', 'other'];
-      var labels = { shot: 'SHOTS', orb: 'ORBS', static: 'STATIC', bomb: 'BOMB', ability: 'ABILITY', other: 'OTHER' };
-      var cols = { shot: '#ffe600', orb: '#00e5ff', static: '#f5f76e', bomb: '#ff9f1c', ability: '#ff2dd0', other: '#9fb0c0' };
+      var order = ['shot', 'orb', 'static', 'bomb', 'ability', 'pact', 'other'];
+      var labels = { shot: 'SHOTS', orb: 'ORBS', static: 'STATIC', bomb: 'BOMB', ability: 'ABILITY', pact: 'CURSES', other: 'OTHER' };
+      var cols = { shot: '#ffe600', orb: '#00e5ff', static: '#f5f76e', bomb: '#ff9f1c', ability: '#ff2dd0', pact: '#9b59b6', other: '#9fb0c0' };
       var parts = [];
       for (var di = 0; di < order.length; di++) {
         var v = game.dmgBySource[order[di]] || 0;
@@ -5035,11 +5140,12 @@
       ['SHOTGUN', 'HOMING SHOT', 'SEEKER SWARM'],
       ['ORBIT SHIELD', 'DMG BOOST', 'BLADE ORBIT'],
       ['PIERCE', 'DMG BOOST', 'RAILGUN'],
-      ['MULTI-SHOT', 'ATTACK SPD', 'BULLET STORM']
+      ['MULTI-SHOT', 'ATTACK SPD', 'BULLET STORM'],
+      ['KEEN EDGE', 'HOMING SHOT', 'DEATHSEEKER']
     ];
-    var evoIds = ['seekerswarm', 'bladeorbit', 'railgun', 'bulletstorm'];
+    var evoIds = ['seekerswarm', 'bladeorbit', 'railgun', 'bulletstorm', 'deathseeker'];
     for (var i = 0; i < recipes.length; i++) {
-      var ry = 52 + i * 32;
+      var ry = 50 + i * 27;
       var owned = game.player && game.player.upgradesTaken && game.player.upgradesTaken[evoIds[i]];
       // ingredient boxes
       ctx.fillStyle = '#8a7500';

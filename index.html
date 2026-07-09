@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.5a';
+  var GAME_VERSION = '0.5b';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -332,9 +332,15 @@
   try { sfxMuted = localStorage.getItem('kryptvault_sfx_muted') === '1'; } catch (e) {}
 
   var music = { playing: false, step: 0, nextTime: 0, timer: null, track: 'lobby' };
-  // Two chiptune loops: the original mellow theme now lives in the lobby, and
-  // combat gets a faster minor-key loop with noise percussion so long runs
-  // feel driven instead of droning.
+  // Lobby keeps the original mellow chiptune. Combat is now DOOM ROCK: one
+  // riff-driven track per biome — distorted power chords (see powerChord),
+  // pitch-dropping kicks, backbeat snares. Riffs are 32 sixteenth-steps.
+  // Note names for the riff tables:
+  var N = { C2: 65.41, D2: 73.42, E2: 82.41, F2: 87.31, G2: 98.00, GS2: 103.83,
+            A2: 110.00, AS2: 116.54, B2: 123.47, C3: 130.81, D3: 146.83, DS3: 155.56,
+            E3: 164.81, G3: 196.00,
+            E4: 329.63, G4: 392.00, A4: 440.00, AS4: 466.16, B4: 493.88,
+            C5: 523.25, D5: 587.33, DS5: 622.25, E5: 659.26, F4: 349.23, GS4: 415.30 };
   var MUSIC_TRACKS = {
     lobby: {
       stepDur: 0.14,
@@ -343,12 +349,45 @@
       leadVol: 0.04,
       drums: false
     },
-    combat: {
-      stepDur: 0.105,
-      bass: [110, 110, 98, 110, 110, 110, 131, 147], bassType: 'sawtooth', bassVol: 0.055,
-      lead: [440, 440, 0, 523, 440, 0, 587, 523, 659, 0, 587, 523, 494, 523, 440, 0],
-      leadVol: 0.038,
-      drums: true
+    // THE CATACOMBS — slow doom stomp in E minor
+    combat0: {
+      stepDur: 0.115, doom: true,
+      riff: [N.E2, 0, N.E2, 0,  N.G2, 0, N.E2, 0,  N.E2, 0, N.E2, 0,  N.A2, 0, N.G2, 0,
+             N.E2, 0, N.E2, 0,  N.G2, 0, N.E2, 0,  N.C3, 0, N.B2, 0,  N.G2, 0, N.E2, 0],
+      lead: [0, 0, 0, 0,  N.E4, 0, 0, 0,  0, 0, 0, 0,  N.G4, 0, N.E4, 0,
+             0, 0, 0, 0,  N.B4, 0, N.A4, 0,  0, 0, N.G4, 0,  N.E4, 0, 0, 0],
+      kick:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,1,0],
+      snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0]
+    },
+    // THE DUNES — phrygian desert metal, snaking half-step riff
+    combat1: {
+      stepDur: 0.105, doom: true,
+      riff: [N.E2, N.E2, N.F2, 0,  N.E2, N.E2, N.GS2, 0,  N.E2, N.E2, N.F2, 0,  N.A2, 0, N.GS2, N.F2,
+             N.E2, N.E2, N.F2, 0,  N.E2, N.E2, N.GS2, 0,  N.B2, 0, N.A2, 0,  N.GS2, N.F2, N.E2, 0],
+      lead: [0, 0, 0, 0,  0, 0, 0, 0,  N.E4, 0, N.F4, 0,  N.GS4, 0, 0, 0,
+             0, 0, 0, 0,  N.B4, 0, N.A4, 0,  N.GS4, 0, N.F4, 0,  N.E4, 0, 0, 0],
+      kick:  [1,0,0,0, 1,0,0,0, 1,0,0,1, 0,0,1,0, 1,0,0,0, 1,0,0,0, 1,0,0,1, 0,0,1,0],
+      snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,1]
+    },
+    // THE FROST DEPTHS — colder, heavier, dropped to D
+    combat2: {
+      stepDur: 0.125, doom: true,
+      riff: [N.D2, 0, 0, N.D2,  N.F2, 0, N.D2, 0,  N.D2, 0, 0, N.D2,  N.C2, 0, N.F2, 0,
+             N.D2, 0, 0, N.D2,  N.F2, 0, N.G2, 0,  N.A2, 0, N.G2, 0,  N.F2, 0, N.D2, 0],
+      lead: [0, 0, 0, 0,  0, 0, 0, 0,  N.D5, 0, 0, 0,  N.C5, 0, 0, 0,
+             0, 0, 0, 0,  N.A4, 0, 0, 0,  N.F4, 0, N.G4, 0,  N.D5, 0, 0, 0],
+      kick:  [1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0],
+      snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0]
+    },
+    // THE INFERNO — fastest, thrash chug on E with rising stabs
+    combat3: {
+      stepDur: 0.088, doom: true,
+      riff: [N.E2, N.E2, N.E2, N.E2,  N.E2, N.E2, N.G2, N.G2,  N.E2, N.E2, N.E2, N.E2,  N.B2, N.B2, N.C3, N.C3,
+             N.E2, N.E2, N.E2, N.E2,  N.E2, N.E2, N.G2, N.G2,  N.D3, N.D3, N.C3, N.C3,  N.B2, N.B2, N.G2, N.G2],
+      lead: [0, 0, 0, 0,  N.E5, 0, 0, 0,  0, 0, 0, 0,  N.D5, 0, N.C5, 0,
+             0, 0, 0, 0,  N.E5, 0, N.G4, 0,  N.A4, 0, N.B4, 0,  N.E5, 0, 0, 0],
+      kick:  [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0, 1,1,1,1],
+      snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0]
     }
   };
 
@@ -359,6 +398,67 @@
     g.gain.linearRampToValueAtTime(0, t + dur);
     o.connect(g); g.connect(masterGain);
     o.start(t); o.stop(t + dur + 0.01);
+  }
+
+  // ----- doom-rock voices -----
+  // Shared soft-clip distortion bus: everything routed through it saturates
+  // together, which is what makes stacked oscillators read as one guitar.
+  var distBus = null;
+  function getDistBus() {
+    if (distBus) return distBus;
+    var ws = audioCtx.createWaveShaper();
+    var curve = new Float32Array(256);
+    for (var i = 0; i < 256; i++) {
+      var x = i / 128 - 1;
+      curve[i] = Math.tanh(3.5 * x);
+    }
+    ws.curve = curve;
+    var lp = audioCtx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 2400;
+    var out = audioCtx.createGain(); out.gain.value = 0.5;
+    ws.connect(lp); lp.connect(out); out.connect(masterGain);
+    distBus = ws;
+    return ws;
+  }
+
+  // Power chord: root + slight detune + fifth + sub-octave, sawtooths into
+  // the distortion bus. Short durations read as palm-muted chugs.
+  function powerChord(freq, t, dur, vol) {
+    var bus = getDistBus();
+    var parts = [freq, freq * 1.006, freq * 1.5, freq * 0.5];
+    for (var i = 0; i < parts.length; i++) {
+      var o = audioCtx.createOscillator();
+      o.type = 'sawtooth'; o.frequency.value = parts[i];
+      var g = audioCtx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(vol, t + 0.008); // fast pick attack
+      g.gain.setValueAtTime(vol, t + dur * 0.6);
+      g.gain.linearRampToValueAtTime(0, t + dur);     // mute
+      o.connect(g); g.connect(bus);
+      o.start(t); o.stop(t + dur + 0.02);
+    }
+  }
+
+  // Kick with a pitch drop (the "oomph"), snare = noise + tone crack.
+  function doomKick(t) {
+    var o = audioCtx.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(150, t);
+    o.frequency.exponentialRampToValueAtTime(45, t + 0.08);
+    var g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.22, t);
+    g.gain.linearRampToValueAtTime(0, t + 0.1);
+    o.connect(g); g.connect(masterGain);
+    o.start(t); o.stop(t + 0.11);
+  }
+
+  function doomSnare(t) {
+    musicNoise(t, 0.09, 0.08);
+    var o = audioCtx.createOscillator(); o.type = 'square'; o.frequency.value = 190;
+    var g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.05, t);
+    g.gain.linearRampToValueAtTime(0, t + 0.06);
+    o.connect(g); g.connect(masterGain);
+    o.start(t); o.stop(t + 0.07);
   }
 
   // White-noise burst for the combat percussion (8-bit snare/hat).
@@ -381,14 +481,28 @@
     var stepDur = tr.stepDur;
     while (music.nextTime < audioCtx.currentTime + 0.3) {
       var s = music.step;
-      if (s % 2 === 0) musicNote(tr.bass[(s / 2) % tr.bass.length | 0], music.nextTime, stepDur * 1.8, tr.bassType, tr.bassVol);
-      var lead = tr.lead[s % tr.lead.length];
-      if (lead) musicNote(lead, music.nextTime, stepDur * 0.8, 'square', tr.leadVol);
-      if (tr.drums) {
-        var ds = s % 8;
-        if (ds === 0) musicNote(55, music.nextTime, stepDur * 0.9, 'square', 0.07); // kick thump
-        if (ds === 4) musicNoise(music.nextTime, 0.05, 0.05);                       // snare
-        if (ds === 6) musicNoise(music.nextTime, 0.02, 0.02);                       // hat tick
+      var t = music.nextTime;
+      if (tr.doom) {
+        // riff-driven doom rock: 32-step riff of power chords + drum tables
+        var rs = s % tr.riff.length;
+        var root = tr.riff[rs];
+        if (root) powerChord(root, t, stepDur * 0.9, 0.05);
+        var dlead = tr.lead[rs];
+        if (dlead) musicNote(dlead, t, stepDur * 1.5, 'square', 0.032);
+        if (tr.kick[rs])  doomKick(t);
+        if (tr.snare[rs]) doomSnare(t);
+        if (rs % 2 === 1) musicNoise(t, 0.015, 0.014); // offbeat hat tick
+      } else {
+        // legacy chiptune (lobby)
+        if (s % 2 === 0) musicNote(tr.bass[(s / 2) % tr.bass.length | 0], t, stepDur * 1.8, tr.bassType, tr.bassVol);
+        var lead = tr.lead[s % tr.lead.length];
+        if (lead) musicNote(lead, t, stepDur * 0.8, 'square', tr.leadVol);
+        if (tr.drums) {
+          var ds = s % 8;
+          if (ds === 0) musicNote(55, t, stepDur * 0.9, 'square', 0.07);
+          if (ds === 4) musicNoise(t, 0.05, 0.05);
+          if (ds === 6) musicNoise(t, 0.02, 0.02);
+        }
       }
       music.nextTime += stepDur;
       music.step++;
@@ -417,10 +531,15 @@
     startMusic();
   }
 
+  // Each biome has its own doom-rock combat track (combat0..combat3).
+  function combatTrackName() {
+    return 'combat' + (Math.floor(((game.wave || 1) - 1) / 10) % 4);
+  }
+
   function musicTrackForState() {
     var s = game.gameState;
     return (s === 'playing' || s === 'waveintro' || s === 'levelup' || s === 'ascend' || s === 'paused')
-      ? 'combat' : 'lobby';
+      ? combatTrackName() : 'lobby';
   }
 
   function toggleMute() {
@@ -1845,7 +1964,7 @@
     pl.xpMult *= (1 + 0.1 * tomeLevel('wis'));
     buildFloor();
     beginWave(1);
-    setMusicTrack('combat');
+    setMusicTrack(combatTrackName());
   }
 
   // Set up a wave. Wave 1 gets the frozen 2-second intro card; later waves
@@ -1858,6 +1977,8 @@
     if (n >= 10) unlockAch('wave_10');
     game.wave = n;
     game.bossWave = (n % 10 === 0); // bosses are biome finales (10/20/30...)
+    // crossing into a new biome swaps the doom track (no-op mid-biome)
+    if (music.playing) setMusicTrack(combatTrackName());
     game.boss = null;
     game.waveKills = 0;
     game.waveTarget = game.bossWave ? 1 : (15 + n * 5);

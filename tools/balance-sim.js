@@ -8,7 +8,7 @@
 
 // ---------- game constants (lifted from kryptvault.html v0.5) ----------
 const CLASSES = {
-  warrior: { hp: 200, speed: 60,  damage: 32, cooldown: 1.0, pierce: 0, homingBase: 0,    shotSpeed: 200, dr: 0.12 },
+  warrior: { hp: 220, speed: 70,  damage: 32, cooldown: 1.0, pierce: 0, homingBase: 0,    shotSpeed: 200, dr: 0.15 },
   rogue:   { hp: 70,  speed: 125, damage: 14, cooldown: 0.4, pierce: 0, homingBase: 0,    shotSpeed: 200, dr: 0 },
   mage:    { hp: 80,  speed: 70,  damage: 40, cooldown: 1.0, pierce: 1, homingBase: 0.06, shotSpeed: 200, dr: 0 },
   ranger:  { hp: 65,  speed: 90,  damage: 34, cooldown: 0.9, pierce: 2, homingBase: 0,    shotSpeed: 340, dr: 0 },
@@ -188,6 +188,18 @@ function makePlayer(cls) {
   };
 }
 
+// --matrix mode knobs: force an ascendancy pick and equip tomes
+let FORCED_ASC = null;
+let TOMES = null; // e.g. { vit: 5, mig: 5, swf: 5 } — the typical veteran loadout
+
+function applyTomes(p) {
+  if (!TOMES) return;
+  p.maxHp += 20 * (TOMES.vit || 0); p.hp = p.maxHp;
+  p.damage = Math.round(p.damage * (1 + 0.1 * (TOMES.mig || 0)));
+  p.speed += 5 * (TOMES.swf || 0);
+  p.xpMult *= (1 + 0.1 * (TOMES.wis || 0));
+}
+
 function offerCards(p, poolIds) {
   for (const [id, evo] of Object.entries(EVOS)) {
     if (p.taken[id]) continue;
@@ -217,12 +229,14 @@ function pickCard(offered, prio, p, g) {
   p.taken[id] = (p.taken[id] || 0) + 1;
 }
 
+const ASC_MAP = {
+  warrior: ['juggernaut', 'berserker'], rogue: ['phantom', 'assassin'],
+  mage: ['frostmage', 'lightmage'], ranger: ['sniper', 'trapper'],
+};
+
 function ascFor(cls) {
-  const map = {
-    warrior: ['juggernaut', 'berserker'], rogue: ['phantom', 'assassin'],
-    mage: ['frostmage', 'lightmage'], ranger: ['sniper', 'trapper'],
-  };
-  const [a, b] = map[cls];
+  if (FORCED_ASC) return FORCED_ASC;
+  const [a, b] = ASC_MAP[cls];
   return Math.random() < 0.5 ? a : b;
 }
 
@@ -238,6 +252,7 @@ function applyAsc(p, id) {
 
 function simulateRun(cls, stratName, poolIds, maxWave = 200) {
   const p = makePlayer(cls);
+  applyTomes(p);
   const prio = STRATEGIES[stratName];
   const g = {
     curseHpMult: 1, curseSpeedMult: 1, spawnHaste: 1, cultists: 0,
@@ -310,6 +325,34 @@ function quantiles(arr) {
 
 const poolIds = Object.keys(POOL);
 const N = 300;
+
+// ---- matrix mode: class x ascendancy x tomes (new player vs veteran) ----
+if (process.argv.includes('--matrix')) {
+  // a solid generalist draft so the matrix isolates class/asc/tome effects
+  STRATEGIES.balanced = ['damage', 'atkspeed', 'shield', 'static', 'health', 'armor', 'vampire'];
+  console.log(`KRYPTVAULT class/ascendancy/tome matrix — 'balanced' draft, ${N} runs/cell`);
+  console.log('tomes: none = fresh player, maxed = VIT5+MIG5+SWF5 veteran loadout\n');
+  console.log('class    ascendancy   tomes   p25   med   p75   max');
+  console.log('-'.repeat(60));
+  for (const cls of Object.keys(CLASSES)) {
+    for (const asc of ASC_MAP[cls]) {
+      for (const tomes of [null, { vit: 5, mig: 5, swf: 5 }]) {
+        FORCED_ASC = asc;
+        TOMES = tomes;
+        const waves = [];
+        for (let i = 0; i < N; i++) waves.push(simulateRun(cls, 'balanced', poolIds).wave);
+        const q = quantiles(waves);
+        console.log(cls.padEnd(8) + ' ' + asc.padEnd(12) + ' ' +
+          (tomes ? 'maxed' : 'none ') + ' ' +
+          String(q.p25).padStart(5) + String(q.med).padStart(6) +
+          String(q.p75).padStart(6) + String(q.max).padStart(6));
+      }
+    }
+    console.log('-'.repeat(60));
+  }
+  FORCED_ASC = null; TOMES = null;
+  process.exit(0);
+}
 
 console.log(`KRYPTVAULT balance sim — v0.5 pool (${poolIds.length} cards), ${N} runs/cell\n`);
 console.log('class    strategy        p25   med   p75   max  (death wave; max 200 = immortal-capped)');

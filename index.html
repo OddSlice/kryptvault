@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.5';
+  var GAME_VERSION = '0.5a';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -1493,12 +1493,12 @@
   // STARTING CLASSES (unlocked by reaching wave 3 once)
   // ---------------------------------------------------------------------------
   var CLASSES = [
-    { id: 'warrior', name: 'WARRIOR', color: '#cc3333', hp: 200, speed: 60,  damage: 32, cooldown: 1.0, pierce: 0, homingBase: 0,    bars: [5, 2, 4], tile: TILE.heroWarrior },
+    { id: 'warrior', name: 'WARRIOR', color: '#cc3333', hp: 220, speed: 70,  damage: 32, cooldown: 1.0, pierce: 0, homingBase: 0,    bars: [5, 2, 4], tile: TILE.heroWarrior },
     { id: 'rogue',   name: 'ROGUE',   color: '#33cc66', hp: 70,  speed: 125, damage: 14, cooldown: 0.4, pierce: 0, homingBase: 0,    bars: [2, 5, 2], tile: TILE.heroRogue },
     { id: 'mage',    name: 'MAGE',    color: '#6633cc', hp: 80,  speed: 70,  damage: 40, cooldown: 1.0, pierce: 1, homingBase: 0.06, bars: [2, 2, 5], tile: TILE.heroMage },
     // Ranger: coin-unlocked 4th class — fragile, slow fire, but long fast arrows
     // with innate pierce. Skill/positioning class. shotSpeed overrides the 200 default.
-    { id: 'ranger',  name: 'RANGER',  color: '#c99a3a', hp: 65,  speed: 90,  damage: 34, cooldown: 0.9, pierce: 2, homingBase: 0,    bars: [2, 3, 5], tile: { x: 64, y: 144 }, shotSpeed: 340, price: 10000 }
+    { id: 'ranger',  name: 'RANGER',  color: '#c99a3a', hp: 65,  speed: 90,  damage: 34, cooldown: 0.9, pierce: 2, homingBase: 0,    bars: [2, 3, 5], tile: { x: 64, y: 144 }, shotSpeed: 340, price: 5000 }
   ];
 
   function classDef(id) {
@@ -3187,9 +3187,9 @@
       playPickup();
       return;
     }
-    // warriors shrug off 12% of all incoming damage (innate armor);
+    // warriors shrug off 15% of all incoming damage (innate armor);
     // iron skin stacks and the juggernaut ascendancy multiply on top
-    if (currentClass === 'warrior') amount = amount * 0.88;
+    if (currentClass === 'warrior') amount = amount * 0.85;
     if (p.ascendDR > 0) amount = amount * (1 - p.ascendDR);
     if (p.armor > 0) amount = amount * (1 - p.armor);
     amount = Math.max(1, Math.round(amount));

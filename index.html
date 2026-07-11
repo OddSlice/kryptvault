@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.5c';
+  var GAME_VERSION = '0.5d';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -1026,10 +1026,14 @@
     { id: 'retribution', name: 'RETRIBUTION',  desc: 'Foes that hit you take 60 dmg', con: '-15 MAX HP', detail: 'STACKS: +40 DMG',  color: '#8b0000', cursed: true, cap: 5 }
   ];
 
-  // Offered when every pool card is maxed out (marathon runs): a small,
-  // safely-infinite reward so the level-up screen always has a pick.
-  var TRIBUTE_CARD = { id: 'tribute', name: 'CRYPT TRIBUTE', desc: 'Heal 25% HP and +25 coins',
-                       con: 'NONE - YOU EARNED IT', detail: 'ALWAYS AVAILABLE', color: '#FFD700' };
+  // Offered when every pool card is maxed out (marathon runs): three small,
+  // safely-infinite rewards so deep drafts stay a real choice. None of these
+  // touch a global multiplier, so they cannot compound into a meltdown.
+  var TRIBUTE_CARDS = [
+    { id: 'tribute',    name: 'CRYPT TRIBUTE', desc: 'Heal 25% of your max HP', con: 'NONE - YOU EARNED IT', detail: 'ENDLESS', color: '#1dd1a1' },
+    { id: 'bloodtithe', name: 'BLOOD TITHE',   desc: '+3 damage per shot',      con: 'NONE - YOU EARNED IT', detail: 'ENDLESS', color: '#ff9ff3' },
+    { id: 'deathsfavor',name: "DEATH'S FAVOR", desc: '+1% crit chance',         con: 'NONE - YOU EARNED IT', detail: 'ENDLESS - MAX 90%', color: '#ffb347' }
+  ];
 
   // ---------------------------------------------------------------------------
   // VAULT SHOP — permanent buffs bought with coins between runs
@@ -1412,8 +1416,16 @@
     bulletstorm: { pal: { M: '#ff6bff', W: '#ffffff' }, rows: [
       '..MW........', '......MW....', 'MW.......MW.', '....MW......',
       '.........MW.', '.MW....MW...', '.....MW.....', 'MW........MW',
-      '...MW.......', '.......MW...', '..MW.....MW.', '.....MW.....'] }
+      '...MW.......', '.......MW...', '..MW.....MW.', '.....MW.....'] },
+    // endless tribute trio reuses familiar art
+    tribute: { pal: { R: '#1dd1a1', P: '#b8ffe0' }, rows: [
+      '..RR....RR..', '.RRRR..RRRR.', 'RRPRRRRRRRRR', 'RPRRRRRRRRRR',
+      'RRRRRRRRRRRR', 'RRRRRRRRRRRR', '.RRRRRRRRRR.', '..RRRRRRRR..',
+      '...RRRRRR...', '....RRRR....', '.....RR.....', '............'] }
   };
+  // the other two endless cards reuse familiar icons
+  CARD_ART.bloodtithe = CARD_ART.damage;
+  CARD_ART.deathsfavor = CARD_ART.crit;
 
   function drawPixelIcon(art, x, y, scale) {
     for (var r = 0; r < art.rows.length; r++) {
@@ -2315,8 +2327,9 @@
       var idx = randInt(0, pool.length - 1);
       chosen.push(pool.splice(idx, 1)[0]);
     }
-    // everything maxed: offer the always-safe tribute so the draft never jams
-    if (chosen.length === 0) chosen.push(TRIBUTE_CARD);
+    // everything maxed: offer the endless trio so the draft never jams and
+    // marathon levels stay a real heal-vs-damage-vs-crit decision
+    if (chosen.length === 0) chosen = TRIBUTE_CARDS.slice();
     // build card rects
     var cardW = 120, cardH = 160, gap = 20;
     var totalW = chosen.length * cardW + (chosen.length - 1) * gap;
@@ -2389,9 +2402,10 @@
       case 'retribution': p.retribution += 1;
                         p.maxHp = Math.max(30, p.maxHp - 15);
                         p.hp = Math.min(p.hp, p.maxHp); break;
-      // endless-run fallback: the pool is exhausted, hand out a breather
-      case 'tribute':   p.hp = Math.min(p.maxHp, p.hp + Math.round(p.maxHp * 0.25 * p.healMult));
-                        game.coinsEarned += 25; break;
+      // endless-run fallbacks: the pool is exhausted, small safe rewards
+      case 'tribute':    p.hp = Math.min(p.maxHp, p.hp + Math.round(p.maxHp * 0.25 * p.healMult)); break;
+      case 'bloodtithe': p.damage += 3; break;
+      case 'deathsfavor':p.critChance = Math.min(0.9, p.critChance + 0.01); break;
       // evolutions
       case 'seekerswarm': p.seekerSwarm = 1;
                           p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;

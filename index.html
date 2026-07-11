@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.5b';
+  var GAME_VERSION = '0.5c';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -1000,31 +1000,36 @@
   // UPGRADE DEFINITIONS
   // ---------------------------------------------------------------------------
   var UPGRADES = [
-    { id: 'multishot', name: 'MULTI-SHOT', desc: '+1 projectile per shot', con: '-12% DAMAGE',     detail: 'STACKS - MAX 5 SHOTS',   color: '#ff6b6b' },
-    { id: 'atkspeed',  name: 'ATTACK SPD', desc: 'Fire 0.1s faster',       con: 'SHOTS 10% SLOWER', detail: 'STACKS - MIN 0.2S',     color: '#feca57' },
-    { id: 'damage',    name: 'DMG BOOST',  desc: '+15 damage per shot',    con: 'FIRE 0.05s SLOWER', detail: 'STACKS',               color: '#ff9ff3' },
-    { id: 'health',    name: 'HEALTH UP',  desc: '+30 max HP, heal half your missing HP', con: '-5 MOVE SPEED', detail: 'STACKS',    color: '#1dd1a1' },
-    { id: 'movespeed', name: 'MOVE SPD',   desc: '+20 move speed',         con: '-10 MAX HP',      detail: 'STACKS',                 color: '#54a0ff' },
-    { id: 'pierce',    name: 'PIERCE',     desc: 'Shots pierce +1 foe',    con: '-10% DAMAGE',     detail: 'STACKS',                 color: '#48dbfb' },
-    { id: 'vampire',   name: 'VAMPIRE',    desc: 'Heal 3 HP per kill',     con: '-15 MAX HP',      detail: 'STACKS',                 color: '#ee5253' },
-    { id: 'xpmagnet',  name: 'XP MAGNET',  desc: '+20% XP from kills',     con: 'FOES +4% SPEED',  detail: 'STACKS',                 color: '#5f27cd' },
-    { id: 'shotgun',   name: 'SHOTGUN',    desc: '4 heavy pellets knock foes back', con: 'FIRE 0.1s SLOWER', detail: 'STACKS: +1 PELLET', color: '#ff9f1c' },
-    { id: 'homing',    name: 'HOMING SHOT',desc: 'Shots seek foes',        con: 'SHOTS 15% SLOWER', detail: 'STACKS: STRONGER SEEK', color: '#2ec4b6' },
-    { id: 'shield',    name: 'ORBIT SHIELD',desc:'5 fast orbs circle you', con: '-8 MOVE SPEED',   detail: 'STACKS: +1 ORB',         color: '#00e5ff' },
-    { id: 'frost',     name: 'FROST SHOTS', desc: 'Hits slow foes 30%',    con: '-10% DAMAGE',     detail: 'STACKS: STRONGER SLOW',  color: '#8fd8ff' },
-    { id: 'crit',      name: 'KEEN EDGE',   desc: '+10% crit chance, crits deal 2x', con: '-5% DAMAGE', detail: 'STACKS - MAX 60%',  color: '#ffb347' },
-    { id: 'armor',     name: 'IRON SKIN',   desc: 'Take 10% less damage',  con: '-5 MOVE SPEED',   detail: 'STACKS - MAX 50%',       color: '#7bed9f' },
-    { id: 'static',    name: 'STATIC BURST',desc: 'Zap 3 foes for 70 every 2.5s', con: 'FIRE 0.05s SLOWER', detail: 'STACKS: +1 TARGET, +15 DMG', color: '#f5f76e' },
-    { id: 'velocity',  name: 'VELOCITY',    desc: '+25% projectile speed', con: '-10 MAX HP',      detail: 'STACKS',                 color: '#c8f7ff' },
-    { id: 'heavyshot', name: 'HEAVY SHOT',  desc: 'Bigger projectiles',    con: 'FIRE 0.05s SLOWER', detail: 'STACKS',               color: '#d9a066' },
+    { id: 'multishot', name: 'MULTI-SHOT', desc: '+1 projectile per shot', con: '-12% DAMAGE',     detail: 'STACKS - MAX 5 SHOTS',   color: '#ff6b6b', cap: 4 },
+    { id: 'atkspeed',  name: 'ATTACK SPD', desc: 'Fire 0.1s faster',       con: 'SHOTS 10% SLOWER', detail: 'STACKS - MIN 0.2S',     color: '#feca57', cap: 8 },
+    { id: 'damage',    name: 'DMG BOOST',  desc: '+15 damage per shot',    con: 'FIRE 0.05s SLOWER', detail: 'STACKS x30',           color: '#ff9ff3', cap: 30 },
+    { id: 'health',    name: 'HEALTH UP',  desc: '+30 max HP, heal half your missing HP', con: '-5 MOVE SPEED', detail: 'STACKS x30', color: '#1dd1a1', cap: 30 },
+    { id: 'movespeed', name: 'MOVE SPD',   desc: '+20 move speed',         con: '-10 MAX HP',      detail: 'STACKS x8',              color: '#54a0ff', cap: 8 },
+    { id: 'pierce',    name: 'PIERCE',     desc: 'Shots pierce +1 foe',    con: '-10% DAMAGE',     detail: 'STACKS x8',              color: '#48dbfb', cap: 8 },
+    { id: 'vampire',   name: 'VAMPIRE',    desc: 'Heal 3 HP per kill',     con: '-15 MAX HP',      detail: 'STACKS x10',             color: '#ee5253', cap: 10 },
+    { id: 'xpmagnet',  name: 'XP MAGNET',  desc: '+20% XP from kills',     con: 'FOES +4% SPEED',  detail: 'STACKS x5',              color: '#5f27cd', cap: 5 },
+    { id: 'shotgun',   name: 'SHOTGUN',    desc: '4 heavy pellets knock foes back', con: 'FIRE 0.1s SLOWER', detail: 'STACKS: +1 PELLET', color: '#ff9f1c', cap: 6 },
+    { id: 'homing',    name: 'HOMING SHOT',desc: 'Shots seek foes',        con: 'SHOTS 15% SLOWER', detail: 'STACKS: STRONGER SEEK', color: '#2ec4b6', cap: 4 },
+    { id: 'shield',    name: 'ORBIT SHIELD',desc:'5 fast orbs circle you', con: '-8 MOVE SPEED',   detail: 'STACKS: +1 ORB',         color: '#00e5ff', cap: 8 },
+    { id: 'frost',     name: 'FROST SHOTS', desc: 'Hits slow foes 30%',    con: '-10% DAMAGE',     detail: 'STACKS: STRONGER SLOW',  color: '#8fd8ff', cap: 3 },
+    { id: 'crit',      name: 'KEEN EDGE',   desc: '+10% crit chance, crits deal 2x', con: '-5% DAMAGE', detail: 'STACKS - MAX 60%',  color: '#ffb347', cap: 6 },
+    { id: 'armor',     name: 'IRON SKIN',   desc: 'Take 10% less damage',  con: '-5 MOVE SPEED',   detail: 'STACKS - MAX 50%',       color: '#7bed9f', cap: 5 },
+    { id: 'static',    name: 'STATIC BURST',desc: 'Zap 3 foes for 70 every 2.5s', con: 'FIRE 0.05s SLOWER', detail: 'STACKS: +1 TARGET, +15 DMG', color: '#f5f76e', cap: 10 },
+    { id: 'velocity',  name: 'VELOCITY',    desc: '+25% projectile speed', con: '-10 MAX HP',      detail: 'STACKS x4',              color: '#c8f7ff', cap: 4 },
+    { id: 'heavyshot', name: 'HEAVY SHOT',  desc: 'Bigger projectiles',    con: 'FIRE 0.05s SLOWER', detail: 'STACKS x4',            color: '#d9a066', cap: 4 },
     // cursed upgrades: a strong boost with a permanent downside
-    { id: 'lucky',       name: 'LUCKY CHARM',  desc: 'Pickups drop twice as often', con: 'FOES +20% HP', detail: 'STACKS',           color: '#FFD700', cursed: true },
-    { id: 'darkpact',    name: 'DARK PACT',    desc: 'Kills explode for 30 dmg', con: 'CULTISTS HUNT YOU', detail: 'STACKS: +15 DMG', color: '#9b59b6', cursed: true },
-    { id: 'executioner', name: 'EXECUTIONER',  desc: 'Crits deal +0.5x more', con: 'FOES +10% SPEED', detail: 'STACKS',              color: '#e74c3c', cursed: true },
-    { id: 'glasscannon', name: 'GLASS CANNON', desc: '+25% damage',   con: '-20 MAX HP',        detail: 'STACKS',                  color: '#ecf0f1', cursed: true },
-    { id: 'hastepact',   name: 'HASTE PACT',   desc: 'Move & fire 15% faster', con: 'FOES SPAWN 15% FASTER', detail: 'STACKS', color: '#ff8c00', cursed: true },
-    { id: 'retribution', name: 'RETRIBUTION',  desc: 'Foes that hit you take 60 dmg', con: '-15 MAX HP', detail: 'STACKS: +40 DMG',  color: '#8b0000', cursed: true }
+    { id: 'lucky',       name: 'LUCKY CHARM',  desc: 'Pickups drop twice as often', con: 'FOES +20% HP', detail: 'STACKS x4',        color: '#FFD700', cursed: true, cap: 4 },
+    { id: 'darkpact',    name: 'DARK PACT',    desc: 'Kills explode for 30 dmg', con: 'CULTISTS HUNT YOU', detail: 'STACKS: +15 DMG', color: '#9b59b6', cursed: true, cap: 5 },
+    { id: 'executioner', name: 'EXECUTIONER',  desc: 'Crits deal +0.5x more', con: 'FOES +10% SPEED', detail: 'STACKS x4',           color: '#e74c3c', cursed: true, cap: 4 },
+    { id: 'glasscannon', name: 'GLASS CANNON', desc: '+25% damage',   con: '-20 MAX HP',        detail: 'STACKS x6',                color: '#ecf0f1', cursed: true, cap: 6 },
+    { id: 'hastepact',   name: 'HASTE PACT',   desc: 'Move & fire 15% faster', con: 'FOES SPAWN 15% FASTER', detail: 'STACKS x4', color: '#ff8c00', cursed: true, cap: 4 },
+    { id: 'retribution', name: 'RETRIBUTION',  desc: 'Foes that hit you take 60 dmg', con: '-15 MAX HP', detail: 'STACKS: +40 DMG',  color: '#8b0000', cursed: true, cap: 5 }
   ];
+
+  // Offered when every pool card is maxed out (marathon runs): a small,
+  // safely-infinite reward so the level-up screen always has a pick.
+  var TRIBUTE_CARD = { id: 'tribute', name: 'CRYPT TRIBUTE', desc: 'Heal 25% HP and +25 coins',
+                       con: 'NONE - YOU EARNED IT', detail: 'ALWAYS AVAILABLE', color: '#FFD700' };
 
   // ---------------------------------------------------------------------------
   // VAULT SHOP — permanent buffs bought with coins between runs
@@ -2062,6 +2067,9 @@
     if (type === 'bomber') speed *= 1.15;
     if (type === 'splitter') { speed *= 0.8; size = 16; }
     if (type === 'mini') { speed *= 1.2; size = 10; }
+    // cap: past this, enemies overshoot the player every frame and turn
+    // into invisible ballistic ghosts (the wave-144 "spawning stopped" bug)
+    speed = Math.min(speed, 300);
     var e = {
       type: type, isBoss: false, uid: game.enemyUid++,
       x: x, y: y,
@@ -2298,12 +2306,17 @@
       }
       if (ready) chosen.push(evo);
     }
-    // fill the remaining slots with distinct regular upgrades
-    var pool = UPGRADES.slice();
+    // fill the remaining slots with distinct regular upgrades; maxed-out
+    // cards leave the pool (marathon runs broke every uncapped multiplier)
+    var pool = UPGRADES.filter(function (u) {
+      return !u.cap || (taken[u.id] || 0) < u.cap;
+    });
     while (chosen.length < 3 && pool.length > 0) {
       var idx = randInt(0, pool.length - 1);
       chosen.push(pool.splice(idx, 1)[0]);
     }
+    // everything maxed: offer the always-safe tribute so the draft never jams
+    if (chosen.length === 0) chosen.push(TRIBUTE_CARD);
     // build card rects
     var cardW = 120, cardH = 160, gap = 20;
     var totalW = chosen.length * cardW + (chosen.length - 1) * gap;
@@ -2342,7 +2355,7 @@
       case 'vampire':   p.vampire += 3;
                         p.maxHp = Math.max(30, p.maxHp - 15);
                         p.hp = Math.min(p.hp, p.maxHp); break;
-      case 'xpmagnet':  p.xpMult *= 1.2;
+      case 'xpmagnet':  p.xpMult = Math.min(3, p.xpMult * 1.2);
                         game.curseSpeedMult *= 1.04; break;
       case 'shotgun':   p.shotgun += 1;
                         p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.1); break;
@@ -2376,6 +2389,9 @@
       case 'retribution': p.retribution += 1;
                         p.maxHp = Math.max(30, p.maxHp - 15);
                         p.hp = Math.min(p.hp, p.maxHp); break;
+      // endless-run fallback: the pool is exhausted, hand out a breather
+      case 'tribute':   p.hp = Math.min(p.maxHp, p.hp + Math.round(p.maxHp * 0.25 * p.healMult));
+                        game.coinsEarned += 25; break;
       // evolutions
       case 'seekerswarm': p.seekerSwarm = 1;
                           p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;
@@ -2391,6 +2407,12 @@
                           p.critChance = Math.min(0.75, p.critChance + 0.15);
                           p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;
     }
+    // hard ceilings — no combination of stacks may break the simulation
+    // (a level-3254 marathon proved every uncapped multiplier will be found)
+    p.speed = Math.min(p.speed, 250);
+    game.curseSpeedMult = Math.min(game.curseSpeedMult, 2.5);
+    game.curseHpMult = Math.min(game.curseHpMult, 10);
+    game.spawnHaste = Math.min(game.spawnHaste, 3);
     if (u.evolution) unlockAch('evolved');
     if (u.cursed) {
       var curses = 0;

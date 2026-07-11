@@ -56,7 +56,7 @@ const POOL = {
   movespeed:  { apply: p => { p.speed += 20; p.maxHp = Math.max(30, p.maxHp - 10); p.hp = Math.min(p.hp, p.maxHp); } },
   pierce:     { apply: p => { p.pierce += 1; p.damage = Math.max(5, Math.round(p.damage * 0.9)); } },
   vampire:    { apply: p => { p.vampire += 3; p.maxHp = Math.max(30, p.maxHp - 15); p.hp = Math.min(p.hp, p.maxHp); } },
-  xpmagnet:   { apply: (p, g) => { p.xpMult *= 1.2; g.curseSpeedMult *= 1.04; } },
+  xpmagnet:   { apply: (p, g) => { p.xpMult = Math.min(3, p.xpMult * 1.2); g.curseSpeedMult = Math.min(2.5, g.curseSpeedMult * 1.04); } },
   shotgun:    { apply: p => { p.shotgun += 1; p.cooldown = Math.min(1.6, p.cooldown + 0.1); } },
   homing:     { apply: p => { p.homing += 1; p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.85)); } },
   shield:     { apply: p => { p.shield += 1; p.speed = Math.max(40, p.speed - 8); } },
@@ -67,11 +67,11 @@ const POOL = {
   velocity:   { apply: p => { p.shotSpeed = Math.round(p.shotSpeed * 1.25); p.maxHp = Math.max(30, p.maxHp - 10); p.hp = Math.min(p.hp, p.maxHp); } },
   heavyshot:  { apply: p => { p.projSize += 1; p.cooldown = Math.min(1.6, p.cooldown + 0.05); } },
   // cursed
-  lucky:      { cursed: true, apply: (p, g) => { p.lucky += 1; g.curseHpMult *= 1.2; } },
+  lucky:      { cursed: true, apply: (p, g) => { p.lucky += 1; g.curseHpMult = Math.min(10, g.curseHpMult * 1.2); } },
   darkpact:   { cursed: true, apply: (p, g) => { p.pactLvl += 1; g.cultists += 1; } },
-  executioner:{ cursed: true, apply: (p, g) => { p.critMult += 0.5; g.curseSpeedMult *= 1.10; } },
+  executioner:{ cursed: true, apply: (p, g) => { p.critMult += 0.5; g.curseSpeedMult = Math.min(2.5, g.curseSpeedMult * 1.10); } },
   glasscannon:{ cursed: true, apply: p => { p.damage = Math.round(p.damage * 1.25); p.maxHp = Math.max(30, p.maxHp - 20); p.hp = Math.min(p.hp, p.maxHp); } },
-  hastepact:  { cursed: true, apply: (p, g) => { p.speed *= 1.15; p.cooldown = Math.max(0.2, p.cooldown / 1.15); g.spawnHaste *= 1.15; } },
+  hastepact:  { cursed: true, apply: (p, g) => { p.speed = Math.min(250, p.speed * 1.15); p.cooldown = Math.max(0.2, p.cooldown / 1.15); g.spawnHaste = Math.min(3, g.spawnHaste * 1.15); } },
   retribution:{ cursed: true, apply: p => { p.retribution += 1; p.maxHp = Math.max(30, p.maxHp - 15); p.hp = Math.min(p.hp, p.maxHp); } },
 };
 const EVOS = {
@@ -200,6 +200,14 @@ function applyTomes(p) {
   p.xpMult *= (1 + 0.1 * (TOMES.wis || 0));
 }
 
+// v0.5c per-card stack caps (maxed cards leave the draft pool)
+const CAPS = {
+  multishot: 4, atkspeed: 8, damage: 30, health: 30, movespeed: 8, pierce: 8,
+  vampire: 10, xpmagnet: 5, shotgun: 6, homing: 4, shield: 8, frost: 3,
+  crit: 6, armor: 5, static: 10, velocity: 4, heavyshot: 4,
+  lucky: 4, darkpact: 5, executioner: 4, glasscannon: 6, hastepact: 4, retribution: 5,
+};
+
 function offerCards(p, poolIds) {
   for (const [id, evo] of Object.entries(EVOS)) {
     if (p.taken[id]) continue;
@@ -207,6 +215,7 @@ function offerCards(p, poolIds) {
   }
   const avail = poolIds.filter(id => {
     const c = POOL[id];
+    if (CAPS[id] && (p.taken[id] || 0) >= CAPS[id]) return false;
     return !(c.max && c.max(p));
   });
   const out = [];

@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.5f';
+  var GAME_VERSION = '0.6';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -379,6 +379,16 @@
       kick:  [1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0]
     },
+    // THE VAULT — dread march: slow tritone doom under the Keeper's door
+    combat4: {
+      stepDur: 0.135, doom: true,
+      riff: [N.E2, 0, 0, 0,  N.AS2, 0, N.E2, 0,  N.E2, 0, 0, 0,  N.B2, 0, N.AS2, 0,
+             N.E2, 0, 0, 0,  N.AS2, 0, N.E2, 0,  N.G2, 0, N.F2, 0,  N.E2, 0, 0, 0],
+      lead: [0, 0, 0, 0,  0, 0, 0, 0,  N.E4, 0, 0, 0,  N.AS4, 0, 0, 0,
+             0, 0, 0, 0,  N.B4, 0, N.AS4, 0,  N.G4, 0, N.F4, 0,  N.E4, 0, 0, 0],
+      kick:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+      snare: [0,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,1,0]
+    },
     // THE INFERNO — fastest, thrash chug on E with rising stabs
     combat3: {
       stepDur: 0.088, doom: true,
@@ -531,9 +541,12 @@
     startMusic();
   }
 
-  // Each biome has its own doom-rock combat track (combat0..combat3).
+  // Each biome has its own doom-rock combat track (combat0..combat4).
   function combatTrackName() {
-    return 'combat' + (Math.floor(((game.wave || 1) - 1) / 10) % 4);
+    var w = game.wave || 1;
+    if (w > 50) return 'combat0';                 // endless: back to the catacombs stomp
+    if (w > 40) return 'combat4';                 // THE VAULT: the dread march
+    return 'combat' + (Math.floor((w - 1) / 10) % 4);
   }
 
   function musicTrackForState() {
@@ -966,17 +979,31 @@
   var BIOMES = [
     // cold grey-blue wash so the brown dirt floor reads as crypt stone, not
     // desert sand (players confused waves 1-10 with the Dunes)
+    // skin: tint washed over melee enemy sprites; shot: the biome caster's bolt colour
     { name: 'THE CATACOMBS', tint: 'rgba(70,90,140,0.30)',    speck: '#6a7a92',      texture: 'brick',
+      skin: null,      shot: '#e8e0d0',
       wallFill: '#334455', wallAlt: '#36475a', wallBorder: '#556677', wallShadow: '#223344' },
     { name: 'THE DUNES',     tint: 'rgba(210,140,30,0.14)',   speck: '#8a6a3a',      texture: 'strata',
+      skin: '#c98a3a', shot: '#9ddb3a',
       wallFill: '#5d4a2e', wallAlt: '#66512f', wallBorder: '#8a734a', wallShadow: '#3e3220' },
     { name: 'THE FROST DEPTHS', tint: 'rgba(90,150,255,0.16)', speck: '#cfe8ff',     texture: 'ice',
+      skin: '#7fd7ff', shot: '#7fd7ff',
       wallFill: '#2e4a63', wallAlt: '#325371', wallBorder: '#5d89a8', wallShadow: '#1e3242' },
     { name: 'THE INFERNO',   tint: 'rgba(200,30,10,0.14)',    speck: '#ff5a1c',      texture: 'ember',
-      wallFill: '#3a2626', wallAlt: '#402a28', wallBorder: '#7a4033', wallShadow: '#241414' }
+      skin: '#ff5a3a', shot: '#ff7a2a',
+      wallFill: '#3a2626', wallAlt: '#402a28', wallBorder: '#7a4033', wallShadow: '#241414' },
+    // the boss biome: waves 41-50 climb to THE VAULT KEEPER
+    { name: 'THE VAULT',     tint: 'rgba(70,35,110,0.26)',    speck: '#c9a227',      texture: 'vault',
+      skin: '#c9a227', shot: '#c9a227',
+      wallFill: '#2a2035', wallAlt: '#332744', wallBorder: '#c9a227', wallShadow: '#171021' }
   ];
+  // 1-40: the four biome chapters; 41-50: THE VAULT (boss biome);
+  // 51+: back into the catacombs for the endless waves.
   function currentBiome() {
-    return BIOMES[Math.floor((game.wave - 1) / 10) % BIOMES.length];
+    var w = game.wave || 1;
+    if (w > 50) return BIOMES[0];
+    if (w > 40) return BIOMES[4];
+    return BIOMES[Math.floor((w - 1) / 10) % 4];
   }
 
   var floorTiles = [];
@@ -1761,7 +1788,11 @@
           if (x < o.x + o.w && x + cw > o.x && y < o.y + o.h && y + ch > o.y) { hit = true; break; }
         }
         if (hit) continue;
-        out.push({ x: x, y: y, w: cw, h: ch, tileVariant: Math.floor(srand() * 2) });
+        // ~30% of blocks are breakable (3 hits) until the Keeper falls;
+        // the endless waves (51+) are solid, unyielding crypt
+        var brk = waveNumber <= 50 && srand() < 0.3;
+        out.push({ x: x, y: y, w: cw, h: ch, tileVariant: Math.floor(srand() * 2),
+                   breakable: brk, bhp: 3 });
         break;
       }
     }
@@ -1946,6 +1977,7 @@
     game.newRecord = false;
     game.enemyShots = [];
     game.waveBanner = 0;
+    game.endlessBanner = 0;
     game.curseHpMult = 1;
     game.curseSpeedMult = 1;
     game.cultistLevel = 0;
@@ -1996,6 +2028,8 @@
     if (n >= 10) unlockAch('wave_10');
     game.wave = n;
     game.bossWave = (n % 10 === 0); // bosses are biome finales (10/20/30...)
+    // the Keeper has fallen: the crypt opens into the endless waves
+    if (n === 51) game.endlessBanner = 5;
     // crossing into a new biome swaps the doom track (no-op mid-biome)
     if (music.playing) setMusicTrack(combatTrackName());
     game.boss = null;
@@ -2034,6 +2068,7 @@
     if (wave >= 5 && roll < 0.10) return 'wraith';
     if (wave >= 3 && roll < 0.22) return 'bomber';
     if (wave >= 2 && roll < 0.36) return 'splitter';
+    if (wave >= 6 && roll < 0.44) return 'caster'; // the biome's ranged menace
     if (wave >= 4 && roll < 0.55) return 'orc';
     if (roll < 0.75) return 'skeleton';
     return 'slime';
@@ -2044,6 +2079,7 @@
     slime:    { hp: 50, color: '#43e1b3', tile: TILE.slime },
     orc:      { hp: 120, color: '#e84537', tile: TILE.orc },
     cultist:  { hp: 45, color: '#9b59b6', tile: TILE.skeleton },
+    caster:   { hp: 40, color: '#b06ce8', tile: TILE.skeleton }, // biome mage: archer/spitter/ice mage/fire imp
     splitter: { hp: 70, color: '#7ad9a8', tile: TILE.slime },     // splits into minis
     mini:     { hp: 16, color: '#43e1b3', tile: TILE.slime },     // splitter offspring
     bomber:   { hp: 35, color: '#ff7733', tile: TILE.orc },       // suicide explosion
@@ -2078,6 +2114,7 @@
     var speed = (40 + game.wave * 6) * game.curseSpeedMult * ease;
     var size = 14;
     if (type === 'cultist') speed *= 0.8;
+    if (type === 'caster') speed *= 0.75;
     if (type === 'wraith') { speed *= 1.35; size = 12; }
     if (type === 'bomber') speed *= 1.15;
     if (type === 'splitter') { speed *= 0.8; size = 16; }
@@ -2104,6 +2141,18 @@
       hitFlash: 0,
       animPhase: rand(0, Math.PI * 2)
     };
+    // biome dress code: melee families wear the biome's palette as a wash,
+    // the caster wears it boldly and fires bolts in the biome's colour
+    var eB = currentBiome();
+    if (type === 'caster') {
+      e.skinTint = eB.skin || '#b06ce8';
+      e.skinAlpha = 0.55;
+      e.shotCol = eB.shot;
+    } else if (eB.skin && (type === 'skeleton' || type === 'slime' || type === 'orc' ||
+               type === 'splitter' || type === 'mini')) {
+      e.skinTint = eB.skin;
+      e.skinAlpha = 0.30;
+    }
     // elite roll: rare gold-ringed variant, triple HP, juicy XP
     if (game.wave >= 3 && type !== 'mini' && Math.random() < 0.06) {
       e.elite = true;
@@ -2129,15 +2178,19 @@
   var BOSS_DEFS = {
     charger:  { name: 'THE WARDEN',      color: '#ffd700', tile: TILE.bossWarden,   size: 26, draw: 30, speed: 22 },
     summoner: { name: 'THE NECROMANCER', color: '#b06ce8', tile: null,              size: 30, draw: 36, speed: 28 },
-    spiral:   { name: 'THE REVENANT',    color: '#7fe8dd', tile: TILE.bossRevenant, size: 24, draw: 32, speed: 30, ghost: true }
+    spiral:   { name: 'THE REVENANT',    color: '#7fe8dd', tile: TILE.bossRevenant, size: 24, draw: 32, speed: 30, ghost: true },
+    // wave 50 finale: rotates every signature move, enrages below half HP
+    keeper:   { name: 'THE VAULT KEEPER', color: '#c9a227', tile: null,             size: 34, draw: 46, speed: 26 }
   };
 
   function spawnBoss() {
-    var kind = BOSS_KINDS[(Math.round(game.wave / 10) - 1 + 300) % 3];
+    var kind = game.wave === 50 ? 'keeper'
+             : BOSS_KINDS[(Math.round(game.wave / 10) - 1 + 300) % 3];
     var def = BOSS_DEFS[kind];
     // 1.3x: biome-finale bosses hit the end of a 10-wave arc, so they get a
     // little extra bulk over the old every-5 cadence
     var hp = Math.round((600 + game.wave * 80) * 1.3 * game.curseHpMult);
+    if (kind === 'keeper') hp = Math.round(hp * 2.2); // the run's true wall
     var boss = {
       type: 'boss', isBoss: true, kind: kind, uid: game.enemyUid++,
       name: def.name, drawSize: def.draw, ghost: !!def.ghost,
@@ -2636,6 +2689,7 @@
     if (game.shakeTimer > 0) game.shakeTimer -= dt;
     if (game.whiteFlash > 0) game.whiteFlash -= 1;
     if (game.waveBanner > 0) game.waveBanner -= dt;
+    if (game.endlessBanner > 0) game.endlessBanner -= dt;
     for (var ti = game.toasts.length - 1; ti >= 0; ti--) {
       game.toasts[ti].t += dt;
       if (game.toasts[ti].t >= 3) game.toasts.splice(ti, 1);
@@ -2809,6 +2863,19 @@
       var hitWall = boxHitsWall(pr.x, pr.y, 6, 6);
       if (hitWall && !pr.inWall) {
         spawnWallSparks(pr.x, pr.y);
+        // breakable blocks crumble after 3 hits (Mario rules)
+        if (hitWall.breakable) {
+          hitWall.bhp--;
+          bgDirty = true;
+          if (hitWall.bhp <= 0) {
+            var wcx = hitWall.x + hitWall.w / 2, wcy = hitWall.y + hitWall.h / 2;
+            spawnDeathParticles(wcx, wcy, currentBiome().wallBorder);
+            spawnDeathParticles(wcx, wcy, currentBiome().wallFill);
+            walls.splice(walls.indexOf(hitWall), 1);
+            maybeDropPickup(wcx, wcy);
+            game.shakeTimer = Math.max(game.shakeTimer, 0.12);
+          }
+        }
         if (pr.pierce > 0) {
           pr.pierce--;
         } else {
@@ -2836,14 +2903,14 @@
       var edx = p.x - e.x, edy = p.y - e.y;
       var ed = Math.sqrt(edx * edx + edy * edy) || 1;
       var chase = e.speed;
-      if (e.type === 'cultist') {
+      if (e.type === 'cultist' || e.type === 'caster') {
         if (ed < 70) chase = -e.speed * 0.7;       // back away
         else if (ed < 110) chase = 0;              // hold range
         e.shootTimer -= dt;
         if (e.shootTimer <= 0 && ed < 220) {
-          e.shootTimer = Math.max(1.2, 2.4 - game.cultistLevel * 0.2);
+          e.shootTimer = e.type === 'caster' ? 2.2 : Math.max(1.2, 2.4 - game.cultistLevel * 0.2);
           var sa = Math.atan2(edy, edx);
-          game.enemyShots.push({ x: e.x, y: e.y, vx: Math.cos(sa) * 100, vy: Math.sin(sa) * 100 });
+          game.enemyShots.push({ x: e.x, y: e.y, vx: Math.cos(sa) * 100, vy: Math.sin(sa) * 100, col: e.shotCol });
         }
       }
       // bomber: arm the fuse near the player, flash, then detonate
@@ -2909,6 +2976,57 @@
                 spawnEnemyAt(enemyTypeForWave(game.wave), e.x + rand(-20, 20), e.y + rand(-20, 20));
               }
               spawnFloatText(e.x, e.y - 18, 'RISE!', '#b06ce8');
+            }
+          }
+        } else if (e.kind === 'keeper') {
+          // THE VAULT KEEPER: cycles dash / aimed fan / summons; below half
+          // HP everything comes faster and the fan widens. Meant to kill
+          // careless or underbuilt runs — the gate into the endless waves.
+          var enraged = e.hp < e.maxHp * 0.5;
+          if (e.dashTimer > 0) {
+            e.dashTimer -= dt;
+            var knx = e.x + e.dashVx * dt, kny = e.y + e.dashVy * dt;
+            if (!boxHitsWall(knx, kny, e.w, e.h)) { e.x = knx; e.y = kny; }
+            else e.dashTimer = 0;
+            chase = 0;
+            if (e.dashTimer <= 0) {
+              // every charge detonates into a full ring
+              for (var kr = 0; kr < 12; kr++) {
+                var kra = (Math.PI * 2 / 12) * kr;
+                game.enemyShots.push({ x: e.x, y: e.y, vx: Math.cos(kra) * 100, vy: Math.sin(kra) * 100 });
+              }
+              game.shakeTimer = 0.35;
+            }
+          } else if (e.telegraph > 0) {
+            e.telegraph -= dt;
+            chase = 0;
+            if (e.telegraph <= 0) {
+              var kda = Math.atan2(edy, edx);
+              e.dashVx = Math.cos(kda) * 330;
+              e.dashVy = Math.sin(kda) * 330;
+              e.dashTimer = 0.55;
+            }
+          } else if (e.aiTimer <= 0) {
+            e.aiTimer = enraged ? 2.2 : 3.2;
+            e.phase = ((e.phase || 0) + 1) % 3;
+            if (e.phase === 0) {
+              e.telegraph = enraged ? 0.55 : 0.75;
+            } else if (e.phase === 1) {
+              var kfa = Math.atan2(edy, edx);
+              var spreadN = enraged ? 3 : 2;
+              for (var kf = -spreadN; kf <= spreadN; kf++) {
+                game.enemyShots.push({
+                  x: e.x, y: e.y,
+                  vx: Math.cos(kfa + kf * 0.16) * 130,
+                  vy: Math.sin(kfa + kf * 0.16) * 130
+                });
+              }
+              spawnFloatText(e.x, e.y - 26, 'KNEEL!', '#c9a227');
+            } else if (game.enemies.length < 195) {
+              for (var kg = 0; kg < (enraged ? 4 : 3); kg++) {
+                spawnEnemyAt(enemyTypeForWave(game.wave), e.x + rand(-26, 26), e.y + rand(-26, 26));
+              }
+              spawnFloatText(e.x, e.y - 26, 'GUARD ME!', '#c9a227');
             }
           }
         } else if (e.kind === 'spiral') {
@@ -3513,11 +3631,36 @@
         ctx.fillStyle = 'rgba(0,0,0,0.25)';
         for (var ex = 16; ex < wl.w; ex += 16) ctx.fillRect(wl.x + ex, wl.y, 1, wl.h);
         for (var ey = 16; ey < wl.h; ey += 16) ctx.fillRect(wl.x, wl.y + ey, wl.w, 1);
+      } else if (B.texture === 'vault') {
+        // gilded strongbox panels: deep seams with gold studs at the joints
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        for (var gx = 16; gx < wl.w; gx += 16) ctx.fillRect(wl.x + gx, wl.y, 1, wl.h);
+        for (var gy = 16; gy < wl.h; gy += 16) ctx.fillRect(wl.x, wl.y + gy, wl.w, 1);
+        ctx.fillStyle = '#c9a227';
+        for (var jy = 0; jy <= wl.h; jy += 16) {
+          for (var jx = 0; jx <= wl.w; jx += 16) {
+            ctx.fillRect(wl.x + Math.min(jx, wl.w - 2) + (jx ? -1 : 1), wl.y + Math.min(jy, wl.h - 2) + (jy ? -1 : 1), 2, 2);
+          }
+        }
       } else {
         // catacombs brick: 16px seams so big chunks read as tiled blocks
         ctx.fillStyle = 'rgba(0,0,0,0.15)';
         for (var sx2 = 16; sx2 < wl.w; sx2 += 16) ctx.fillRect(wl.x + sx2, wl.y, 1, wl.h);
         for (var sy2 = 16; sy2 < wl.h; sy2 += 16) ctx.fillRect(wl.x, wl.y + sy2, wl.w, 1);
+      }
+      // breakable blocks wear a chipped face; cracks deepen per hit taken
+      if (wl.breakable) {
+        ctx.fillStyle = 'rgba(255,255,255,0.28)';
+        ctx.fillRect(wl.x + 2, wl.y + 2, 4, 1);
+        ctx.fillRect(wl.x + 2, wl.y + 2, 1, 3);
+        var dmg = 3 - (wl.bhp || 3);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        for (var ck = 0; ck <= dmg * 3; ck++) {
+          var ckx = wl.x + 2 + ((ck * 7 + wl.x) % Math.max(1, wl.w - 6));
+          var cky = wl.y + 3 + ((ck * 11 + wl.y) % Math.max(1, wl.h - 8));
+          ctx.fillRect(ckx, cky, 2, 4);
+          ctx.fillRect(ckx - 2, cky + 3, 2, 2);
+        }
       }
     }
   }
@@ -3791,7 +3934,9 @@
     }
     if (e.type === 'splitter' || e.type === 'mini') {
       var ss = e.type === 'splitter' ? 20 : 10;
-      var sdrew = drawTile(e.tile, Math.round(e.x - ss / 2), Math.round(e.y - ss / 2), ss, ss, false);
+      var sdrew = e.skinTint
+        ? drawTintedTile(e.tile, Math.round(e.x - ss / 2), Math.round(e.y - ss / 2), ss, ss, false, e.skinTint, e.skinAlpha || 0.3)
+        : drawTile(e.tile, Math.round(e.x - ss / 2), Math.round(e.y - ss / 2), ss, ss, false);
       if (!sdrew) {
         ctx.fillStyle = e.hitFlash > 0 ? '#fff' : e.color;
         ctx.fillRect(Math.round(e.x - ss / 2), Math.round(e.y - ss / 3), ss, Math.round(ss * 0.66));
@@ -3808,7 +3953,9 @@
       drawEnemyHpBar(e);
       return;
     }
-    var drew = drawTile(e.tile, dx, dy, 16, 16, false);
+    var drew = e.skinTint
+      ? drawTintedTile(e.tile, dx, dy, 16, 16, false, e.skinTint, e.skinAlpha || 0.3)
+      : drawTile(e.tile, dx, dy, 16, 16, false);
     if (drew) {
       if (e.hitFlash > 0) {
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
@@ -3817,6 +3964,12 @@
       if (e.slowT > 0 || game.freezeTimer > 0) {
         ctx.fillStyle = 'rgba(140,215,255,0.35)'; // frost / chrono chill
         ctx.fillRect(dx, dy, 16, 16);
+      }
+      // the biome caster levitates a spell orb in its bolt colour
+      if (e.type === 'caster') {
+        var bob = Math.round(Math.sin(game.time * 4 + e.animPhase) * 2);
+        ctx.fillStyle = e.shotCol || '#b06ce8';
+        ctx.fillRect(dx + 13, dy - 4 + bob, 3, 3);
       }
     } else {
       var col = e.hitFlash > 0 ? '#fff' : e.color;
@@ -3858,6 +4011,10 @@
       drawNecromancer(e, bx, by, dsr, tg);
       return;
     }
+    if (e.kind === 'keeper') {
+      drawKeeper(e, bx, by, dsr, tg);
+      return;
+    }
     if (e.kind === 'spiral') {
       // spectral: translucent, and fades right out while winding up a blink
       var ga = 0.62 + 0.18 * Math.sin(game.time * 5);
@@ -3879,6 +4036,40 @@
     }
     ctx.globalAlpha = 1;
     // boss uses the big dedicated HUD bar, so no small bar here.
+  }
+
+  // THE VAULT KEEPER: a walking strongbox — hulking dark-iron body with
+  // gold trim, a glowing keyhole on the chest, burning violet eyes.
+  function drawKeeper(e, bx, by, dsr, tg) {
+    var u = dsr / 16;
+    var flash = e.hitFlash > 0 || tg;
+    function px(x, y, w, h, col) {
+      ctx.fillStyle = flash && col !== '#b06ce8' ? '#ffffff' : col;
+      ctx.fillRect(Math.round(bx + x * u), Math.round(by + y * u), Math.ceil(w * u), Math.ceil(h * u));
+    }
+    // massive iron body
+    px(2, 3, 12, 11, '#2a2035');
+    px(3, 2, 10, 1, '#2a2035');
+    // gold banding
+    px(2, 3, 12, 1, '#c9a227');
+    px(2, 9, 12, 1, '#c9a227');
+    px(2, 13, 12, 1, '#c9a227');
+    px(2, 3, 1, 11, '#c9a227');
+    px(13, 3, 1, 11, '#c9a227');
+    // rivets
+    px(3, 4, 1, 1, '#e8cf6a'); px(12, 4, 1, 1, '#e8cf6a');
+    px(3, 12, 1, 1, '#e8cf6a'); px(12, 12, 1, 1, '#e8cf6a');
+    // burning violet eyes under the brow band
+    px(5, 5, 2, 2, '#b06ce8');
+    px(9, 5, 2, 2, '#b06ce8');
+    if (game.time % 0.8 < 0.4) { px(5.5, 5.5, 1, 1, '#e8d4ff'); px(9.5, 5.5, 1, 1, '#e8d4ff'); }
+    // the keyhole: circle + slot, glowing when enraged
+    var hot = e.hp < e.maxHp * 0.5 && game.time % 0.5 < 0.25;
+    px(7, 10, 2, 1.5, hot ? '#ff5a3a' : '#c9a227');
+    px(7.5, 11.5, 1, 1.5, hot ? '#ff5a3a' : '#c9a227');
+    // stubby legs
+    px(4, 14, 3, 2, '#171021');
+    px(9, 14, 3, 2, '#171021');
   }
 
   // THE NECROMANCER has no matching tile on the sheet, so it is drawn
@@ -3948,12 +4139,13 @@
       }
       if (scaled) ctx.restore();
     }
-    // cultist shots: magenta so they can't be confused with the player's
+    // enemy shots: biome casters fire in their own colour, everything else
+    // stays magenta so hostile bolts never look like the player's
     for (var s = 0; s < game.enemyShots.length; s++) {
       var sh = game.enemyShots[s];
       ctx.fillStyle = 'rgba(255,60,255,0.3)';
       ctx.fillRect(Math.round(sh.x - 3), Math.round(sh.y - 3), 6, 6);
-      ctx.fillStyle = '#ff44aa';
+      ctx.fillStyle = sh.col || '#ff44aa';
       ctx.fillRect(Math.round(sh.x - 2), Math.round(sh.y - 2), 4, 4);
     }
   }
@@ -4138,6 +4330,15 @@
 
     // ----- wave (top-centre) -----
     text('WAVE ' + pad(game.wave, 2), W / 2, 6, 12, '#ffe600', 'center');
+
+    // ----- the Keeper has fallen: announce the endless waves -----
+    if (game.endlessBanner > 0) {
+      ctx.globalAlpha = Math.min(1, game.endlessBanner / 1.2);
+      text('THE VAULT IS BROKEN', W / 2, 88, 10, '#c9a227', 'center');
+      text('ENDLESS WAVES', W / 2, 108, 16, '#ff2d2d', 'center');
+      text('HOW DEEP CAN YOU GO?', W / 2, 132, 6, '#bbbbbb', 'center');
+      ctx.globalAlpha = 1;
+    }
 
     // ----- fading wave banner (continuous wave flow) -----
     if (game.waveBanner > 0) {

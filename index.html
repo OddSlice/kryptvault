@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.5d';
+  var GAME_VERSION = '0.5e';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -2002,6 +2002,7 @@
     game.spawnTimer = 0;
     game.shockwaves = [];
     walls = generateWalls(n);
+    bgDirty = true; // new wall layout (and possibly biome) — recache the background
     // free anything the new wall layout trapped, and reset edge flags
     for (var ce = 0; ce < game.enemies.length; ce++) {
       pushOutOfWalls(game.enemies[ce]);
@@ -2774,9 +2775,16 @@
     // ----- update projectiles -----
     for (var i = game.projectiles.length - 1; i >= 0; i--) {
       var pr = game.projectiles[i];
-      // homing steering — applied BEFORE the position update, capped at 4deg/frame
+      // homing steering — applied BEFORE the position update, capped at
+      // 4deg/frame. Retargets at 10Hz, not every frame: the nearest-enemy
+      // scan was O(projectiles x enemies) and the lag is imperceptible.
       if (pr.homing > 0) {
-        var ht = findNearestEnemy(pr.x, pr.y);
+        pr.htT = (pr.htT || 0) - dt;
+        if (!pr.ht || pr.ht.hp <= 0 || pr.htT <= 0) {
+          pr.ht = findNearestEnemy(pr.x, pr.y);
+          pr.htT = 0.1;
+        }
+        var ht = pr.ht;
         if (ht) {
           var desired = Math.atan2(ht.y - pr.y, ht.x - pr.x);
           var cur = Math.atan2(pr.vy, pr.vx);
@@ -3499,20 +3507,10 @@
           }
         }
       } else if (B.texture === 'ember') {
-        // deep seams + slowly pulsing molten veins
+        // deep seams (the pulsing molten veins draw live in drawEmberVeins)
         ctx.fillStyle = 'rgba(0,0,0,0.25)';
         for (var ex = 16; ex < wl.w; ex += 16) ctx.fillRect(wl.x + ex, wl.y, 1, wl.h);
         for (var ey = 16; ey < wl.h; ey += 16) ctx.fillRect(wl.x, wl.y + ey, wl.w, 1);
-        for (var vy = 0; vy + 16 <= wl.h; vy += 16) {
-          for (var vx = 0; vx + 16 <= wl.w; vx += 16) {
-            if (((wl.x + vx) * 7 + (wl.y + vy) * 13) % 3 === 1) {
-              var glow = 0.65 + 0.3 * Math.sin(game.time * 3 + vx + vy);
-              ctx.fillStyle = 'rgba(255,100,30,' + glow.toFixed(2) + ')';
-              ctx.fillRect(wl.x + vx + 3, wl.y + vy + 9, 7, 2);
-              ctx.fillRect(wl.x + vx + 8, wl.y + vy + 5, 2, 4);
-            }
-          }
-        }
       } else {
         // catacombs brick: 16px seams so big chunks read as tiled blocks
         ctx.fillStyle = 'rgba(0,0,0,0.15)';
@@ -3520,6 +3518,49 @@
         for (var sy2 = 16; sy2 < wl.h; sy2 += 16) ctx.fillRect(wl.x, wl.y + sy2, wl.w, 1);
       }
     }
+  }
+
+  // Inferno's animated molten veins — the only time-varying part of the
+  // background, drawn live over the cached floor+walls image.
+  function drawEmberVeins() {
+    for (var i = 0; i < walls.length; i++) {
+      var wl = walls[i];
+      for (var vy = 0; vy + 16 <= wl.h; vy += 16) {
+        for (var vx = 0; vx + 16 <= wl.w; vx += 16) {
+          if (((wl.x + vx) * 7 + (wl.y + vy) * 13) % 3 === 1) {
+            var glow = 0.65 + 0.3 * Math.sin(game.time * 3 + vx + vy);
+            ctx.fillStyle = 'rgba(255,100,30,' + glow.toFixed(2) + ')';
+            ctx.fillRect(wl.x + vx + 3, wl.y + vy + 9, 7, 2);
+            ctx.fillRect(wl.x + vx + 8, wl.y + vy + 5, 2, 4);
+          }
+        }
+      }
+    }
+  }
+
+  // The floor and walls are static for a whole wave, so they render once
+  // into an offscreen canvas; every frame then pays a single drawImage
+  // instead of ~600 rects. Rebuilt on wave changes (and when the sprite
+  // sheet finishes loading, since the floor uses it).
+  var bgCache = document.createElement('canvas');
+  bgCache.width = W; bgCache.height = H;
+  var bgDirty = true;
+  var bgUsedSheet = null;
+
+  function drawBackground() {
+    var useSheet = !useProceduralSprites && sheetReady;
+    if (bgDirty || bgUsedSheet !== useSheet) {
+      var old = ctx;
+      ctx = bgCache.getContext('2d');
+      ctx.clearRect(0, 0, W, H);
+      drawFloor();
+      drawWalls();
+      ctx = old;
+      bgDirty = false;
+      bgUsedSheet = useSheet;
+    }
+    ctx.drawImage(bgCache, 0, 0);
+    if (currentBiome().texture === 'ember') drawEmberVeins();
   }
 
   function drawPickups() {
@@ -3878,30 +3919,32 @@
   }
 
   function drawProjectiles() {
+    // heavy shot / fat pellets / sniper arrow scale the actual sprite —
+    // no halo boxes (they stacked into an opaque smear at high counts)
+    var baseScale = 1 + Math.min(4, game.player.projSize) * 0.18;
     for (var i = 0; i < game.projectiles.length; i++) {
       var pr = game.projectiles[i];
-      // sniper mega-arrow: a big glow under whatever the class draws
-      if (pr.big) {
-        ctx.fillStyle = 'rgba(201,154,58,0.4)';
-        ctx.fillRect(Math.round(pr.x - 6), Math.round(pr.y - 6), 12, 12);
-      }
-      // heavy shot / fat pellets: soft halo signals the bigger hitbox
-      var halo = game.player.projSize + (pr.fat ? 1 : 0);
-      if (halo > 0) {
-        var hr = 3 + halo * 2;
-        ctx.fillStyle = 'rgba(217,160,102,0.35)';
-        ctx.fillRect(Math.round(pr.x - hr), Math.round(pr.y - hr), hr * 2, hr * 2);
+      var pscale = baseScale * (pr.fat ? 1.25 : 1) * (pr.big ? 1.6 : 1);
+      var scaled = pscale > 1.01;
+      if (scaled) {
+        ctx.save();
+        ctx.translate(pr.x, pr.y);
+        ctx.scale(pscale, pscale);
+        ctx.translate(-pr.x, -pr.y);
       }
       // class identity: rogues throw daggers, warriors spinning axes,
       // rangers arrows, the mage keeps his glowing orbs
-      if (currentClass === 'rogue') { drawDagger(pr); continue; }
-      if (currentClass === 'warrior') { drawAxe(pr); continue; }
-      if (currentClass === 'ranger') { drawArrow(pr); continue; }
-      // glow + core
-      ctx.fillStyle = 'rgba(255,230,0,0.3)';
-      ctx.fillRect(Math.round(pr.x - 3), Math.round(pr.y - 3), 6, 6);
-      ctx.fillStyle = '#ffe600';
-      ctx.fillRect(Math.round(pr.x - 2), Math.round(pr.y - 2), 4, 4);
+      if (currentClass === 'rogue') { drawDagger(pr); }
+      else if (currentClass === 'warrior') { drawAxe(pr); }
+      else if (currentClass === 'ranger') { drawArrow(pr); }
+      else {
+        // glow + core
+        ctx.fillStyle = 'rgba(255,230,0,0.3)';
+        ctx.fillRect(Math.round(pr.x - 3), Math.round(pr.y - 3), 6, 6);
+        ctx.fillStyle = '#ffe600';
+        ctx.fillRect(Math.round(pr.x - 2), Math.round(pr.y - 2), 4, 4);
+      }
+      if (scaled) ctx.restore();
     }
     // cultist shots: magenta so they can't be confused with the player's
     for (var s = 0; s < game.enemyShots.length; s++) {
@@ -3987,8 +4030,7 @@
     if (game.shakeTimer > 0) {
       ctx.translate(randInt(-3, 3), randInt(-3, 3));
     }
-    drawFloor();
-    drawWalls();
+    drawBackground();
     // spike-trap zones sit on the floor, under everything that walks on it
     for (var tz = 0; tz < game.zones.length; tz++) {
       var zone = game.zones[tz];

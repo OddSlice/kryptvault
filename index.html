@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.5e';
+  var GAME_VERSION = '0.5f';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -964,7 +964,9 @@
   // Design rule: floors stay mid-dark and desaturated so enemy contrast never
   // suffers — tints are low-alpha overlays, never bright fills.
   var BIOMES = [
-    { name: 'THE CATACOMBS', tint: null,                      speck: null,           texture: 'brick',
+    // cold grey-blue wash so the brown dirt floor reads as crypt stone, not
+    // desert sand (players confused waves 1-10 with the Dunes)
+    { name: 'THE CATACOMBS', tint: 'rgba(70,90,140,0.30)',    speck: '#6a7a92',      texture: 'brick',
       wallFill: '#334455', wallAlt: '#36475a', wallBorder: '#556677', wallShadow: '#223344' },
     { name: 'THE DUNES',     tint: 'rgba(210,140,30,0.14)',   speck: '#8a6a3a',      texture: 'strata',
       wallFill: '#5d4a2e', wallAlt: '#66512f', wallBorder: '#8a734a', wallShadow: '#3e3220' },

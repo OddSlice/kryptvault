@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.6';
+  var GAME_VERSION = '0.6a';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -1788,25 +1788,51 @@
           if (x < o.x + o.w && x + cw > o.x && y < o.y + o.h && y + ch > o.y) { hit = true; break; }
         }
         if (hit) continue;
-        // ~30% of blocks are breakable (3 hits) until the Keeper falls;
-        // the endless waves (51+) are solid, unyielding crypt
-        var brk = waveNumber <= 50 && srand() < 0.3;
-        out.push({ x: x, y: y, w: cw, h: ch, tileVariant: Math.floor(srand() * 2),
-                   breakable: brk, bhp: 3 });
+        // each biome's special blocks behave differently (waves <= 50; the
+        // endless crypt is solid):
+        //   1-10  BRICK  breakable, 3 hits
+        //   11-20 SAND   soft mound — wade through at half speed
+        //   21-30 ICE    brittle, 2 hits; shattering chills nearby foes
+        //   31-40 MAGMA  solid, sears anyone pressed against it
+        //   41-50 GILDED tough (4 hits) but always drops loot
+        var kind = null;
+        if (waveNumber <= 50 && srand() < 0.3) {
+          var bIdx = waveNumber > 40 ? 4 : Math.floor((waveNumber - 1) / 10) % 4;
+          kind = ['brick', 'sand', 'ice', 'magma', 'gilded'][bIdx];
+        }
+        var wObj = { x: x, y: y, w: cw, h: ch, tileVariant: Math.floor(srand() * 2), kind: kind };
+        if (kind === 'brick')  { wObj.breakable = true; wObj.bhp = 3; }
+        else if (kind === 'ice')    { wObj.breakable = true; wObj.bhp = 2; }
+        else if (kind === 'gilded') { wObj.breakable = true; wObj.bhp = 4; }
+        else if (kind === 'sand')   { wObj.soft = true; }
+        else if (kind === 'magma')  { wObj.magma = true; }
+        out.push(wObj);
         break;
       }
     }
     return out;
   }
 
-  // First wall intersecting a centred box, or null.
+  // First wall intersecting a centred box, or null. Soft sand mounds never
+  // block anything — they slow instead (see softAt).
   function boxHitsWall(cx, cy, bw, bh) {
     var l = cx - bw / 2, r = cx + bw / 2, t = cy - bh / 2, b = cy + bh / 2;
     for (var i = 0; i < walls.length; i++) {
       var wl = walls[i];
+      if (wl.soft) continue;
       if (l < wl.x + wl.w && r > wl.x && t < wl.y + wl.h && b > wl.y) return wl;
     }
     return null;
+  }
+
+  // Is the box wading through a soft sand mound?
+  function softAt(cx, cy, bw, bh) {
+    var l = cx - bw / 2, r = cx + bw / 2, t = cy - bh / 2, b = cy + bh / 2;
+    for (var i = 0; i < walls.length; i++) {
+      var wl = walls[i];
+      if (wl.soft && l < wl.x + wl.w && r > wl.x && t < wl.y + wl.h && b > wl.y) return true;
+    }
+    return false;
   }
 
   // Nudge an entity out of any wall it overlaps (used when a new wave's wall
@@ -2758,9 +2784,11 @@
     if (p.moving) {
       var len = Math.sqrt(dx * dx + dy * dy);
       dx /= len; dy /= len;
+      // sand mounds: wade through at half speed
+      var wade = softAt(p.x, p.y, p.w, p.h) ? 0.45 : 1;
       // axis-separated wall collision so the player slides along walls
-      var pnx = p.x + dx * p.speed * dt;
-      var pny = p.y + dy * p.speed * dt;
+      var pnx = p.x + dx * p.speed * wade * dt;
+      var pny = p.y + dy * p.speed * wade * dt;
       if (!boxHitsWall(pnx, pny, p.w, p.h)) { p.x = pnx; p.y = pny; }
       else if (!boxHitsWall(pnx, p.y, p.w, p.h)) { p.x = pnx; }
       else if (!boxHitsWall(p.x, pny, p.w, p.h)) { p.y = pny; }
@@ -2863,7 +2891,7 @@
       var hitWall = boxHitsWall(pr.x, pr.y, 6, 6);
       if (hitWall && !pr.inWall) {
         spawnWallSparks(pr.x, pr.y);
-        // breakable blocks crumble after 3 hits (Mario rules)
+        // breakable blocks crumble after a few hits (Mario rules)
         if (hitWall.breakable) {
           hitWall.bhp--;
           bgDirty = true;
@@ -2872,8 +2900,27 @@
             spawnDeathParticles(wcx, wcy, currentBiome().wallBorder);
             spawnDeathParticles(wcx, wcy, currentBiome().wallFill);
             walls.splice(walls.indexOf(hitWall), 1);
-            maybeDropPickup(wcx, wcy);
             game.shakeTimer = Math.max(game.shakeTimer, 0.12);
+            if (hitWall.kind === 'ice') {
+              // shattering ice chills everything nearby
+              spawnDeathParticles(wcx, wcy, '#ffffff');
+              for (var icn = 0; icn < game.enemies.length; icn++) {
+                var ie = game.enemies[icn];
+                var idx2 = ie.x - wcx, idy2 = ie.y - wcy;
+                if (idx2 * idx2 + idy2 * idy2 < 55 * 55) {
+                  ie.slowT = Math.max(ie.slowT || 0, 2);
+                  ie.slowAmt = Math.max(ie.slowAmt || 0, 0.5);
+                }
+              }
+            } else if (hitWall.kind === 'gilded') {
+              // the Vault pays out: guaranteed pickup + coins
+              var loot = ['potion', 'frenzy', 'barrier'][randInt(0, 2)];
+              game.pickups.push({ x: wcx, y: wcy, type: loot, t: 8 });
+              game.coinsEarned += 15;
+              spawnFloatText(wcx, wcy, '+15', '#FFD700');
+            } else {
+              maybeDropPickup(wcx, wcy);
+            }
           }
         }
         if (pr.pierce > 0) {
@@ -3056,6 +3103,8 @@
       }
 
       var slowF = e.slowT > 0 ? (1 - (e.slowAmt || 0.3)) : 1; // frost shots
+      // enemies wade through sand mounds too (wraiths float over)
+      if (e.type !== 'wraith' && !e.ghost && softAt(e.x, e.y, e.w, e.h)) slowF *= 0.45;
       var mvx = (edx / ed) * chase * slowF + e.kx;
       var mvy = (edy / ed) * chase * slowF + e.ky;
       e.kx *= 0.85; e.ky *= 0.85;
@@ -3149,6 +3198,21 @@
       }
       if (sh.x < -8 || sh.x > W + 8 || sh.y < -8 || sh.y > H + 8) {
         game.enemyShots.splice(es, 1);
+      }
+    }
+
+    // ----- magma blocks sear anyone pressed against them -----
+    game.magmaTick = (game.magmaTick || 0) - dt;
+    if (game.magmaTick <= 0) {
+      game.magmaTick = 0.5;
+      for (var mg = 0; mg < walls.length; mg++) {
+        var mw = walls[mg];
+        if (!mw.magma) continue;
+        if (p.x + p.w / 2 > mw.x - 8 && p.x - p.w / 2 < mw.x + mw.w + 8 &&
+            p.y + p.h / 2 > mw.y - 8 && p.y - p.h / 2 < mw.y + mw.h + 8) {
+          if (damagePlayer(8, false)) spawnFloatText(p.x, p.y - 10, 'SEARED', '#ff7a2a');
+          break;
+        }
       }
     }
 
@@ -3589,6 +3653,19 @@
     var B = currentBiome();
     for (var i = 0; i < walls.length; i++) {
       var wl = walls[i];
+      if (wl.soft) {
+        // sand mound: pale, round-shouldered, borderless — reads passable
+        ctx.fillStyle = 'rgba(214,178,110,0.75)';
+        ctx.fillRect(wl.x + 1, wl.y + 1, wl.w - 2, wl.h - 2);
+        ctx.fillStyle = 'rgba(240,210,150,0.8)';
+        ctx.fillRect(wl.x + 3, wl.y + 2, wl.w - 6, 3);
+        ctx.fillStyle = 'rgba(120,90,50,0.5)';
+        for (var sd = 0; sd < 6; sd++) {
+          ctx.fillRect(wl.x + 3 + ((sd * 11 + wl.x) % Math.max(1, wl.w - 6)),
+                       wl.y + 5 + ((sd * 7 + wl.y) % Math.max(1, wl.h - 8)), 2, 2);
+        }
+        continue;
+      }
       ctx.fillStyle = wl.tileVariant === 1 ? B.wallAlt : B.wallFill;
       ctx.fillRect(wl.x, wl.y, wl.w, wl.h);
       // 1px border
@@ -3647,6 +3724,25 @@
         ctx.fillStyle = 'rgba(0,0,0,0.15)';
         for (var sx2 = 16; sx2 < wl.w; sx2 += 16) ctx.fillRect(wl.x + sx2, wl.y, 1, wl.h);
         for (var sy2 = 16; sy2 < wl.h; sy2 += 16) ctx.fillRect(wl.x, wl.y + sy2, wl.w, 1);
+      }
+      // magma: searing orange rim so the danger reads before it burns
+      if (wl.magma) {
+        ctx.fillStyle = 'rgba(255,110,30,0.8)';
+        ctx.fillRect(wl.x - 1, wl.y - 1, wl.w + 2, 1);
+        ctx.fillRect(wl.x - 1, wl.y + wl.h, wl.w + 2, 1);
+        ctx.fillRect(wl.x - 1, wl.y - 1, 1, wl.h + 2);
+        ctx.fillRect(wl.x + wl.w, wl.y - 1, 1, wl.h + 2);
+      }
+      // gilded: a treasure glint marks the loot blocks
+      if (wl.kind === 'gilded') {
+        ctx.fillStyle = '#ffe08a';
+        ctx.fillRect(wl.x + 3, wl.y + 3, 3, 2);
+        ctx.fillRect(wl.x + 4, wl.y + 2, 1, 4);
+      }
+      // ice: frosty top sheen
+      if (wl.kind === 'ice') {
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.fillRect(wl.x + 2, wl.y + 2, wl.w - 4, 2);
       }
       // breakable blocks wear a chipped face; cracks deepen per hit taken
       if (wl.breakable) {

@@ -130,7 +130,27 @@ try {
   console.log('after endless 10s: wave', H.game.wave, 'kills', H.game.score,
               'enemies', H.game.enemies.length);
 
-  console.log('PASS: no exceptions through Keeper fight and endless transition');
+  // per-biome block kinds: each field plays differently until wave 50
+  function kindsAt(n) {
+    H.game.gameState = 'playing'; H.game.cards = [];
+    H.beginWave(n);
+    pump(120); // 2s of combat exercises softAt / magma / crumble paths
+    return H.walls().reduce((m, w) => { if (w.kind) m[w.kind] = (m[w.kind] || 0) + 1; return m; }, {});
+  }
+  const expect = [[5, 'brick'], [15, 'sand'], [25, 'ice'], [35, 'magma'], [45, 'gilded']];
+  for (const [wv, kind] of expect) {
+    const k = kindsAt(wv);
+    const names = Object.keys(k);
+    if (names.length && (names.length !== 1 || names[0] !== kind)) {
+      throw new Error('wave ' + wv + ' expected only ' + kind + ' got ' + JSON.stringify(k));
+    }
+    console.log('wave', wv, 'blocks:', JSON.stringify(k));
+  }
+  const k55 = kindsAt(55);
+  if (Object.keys(k55).length) throw new Error('endless waves must be solid, got ' + JSON.stringify(k55));
+  console.log('wave 55 blocks: {} (solid, as designed)');
+
+  console.log('PASS: no exceptions through Keeper fight, endless transition, and all block kinds');
 } catch (err) {
   console.error('FAIL:', err.stack || err);
   process.exit(1);

@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.6a';
+  var GAME_VERSION = '0.6b';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -581,14 +581,22 @@
   // ---------------------------------------------------------------------------
   var keys = {};
   var mouse = { x: 0, y: 0 };
-  // on-screen ability button (bottom-right): tap/click target for the
-  // ascendancy active; desktop can just press SPACE
-  var ABILITY_BTN = { x: W - 40, y: H - 52, w: 34, h: 34 };
+  // on-screen ability button (bottom-left, heading the upgrade line);
+  // desktop can just press SPACE
+  var ABILITY_BTN = { x: 6, y: H - 52, w: 26, h: 26 };
+  // generous invisible tap zone in the bottom-right corner so right thumbs
+  // can still cast on touch devices (the button itself draws bottom-left)
+  var THUMB_CAST = { x: W - 60, y: H - 60, w: 60, h: 60 };
 
   function overAbilityBtn(p) {
     return game.gameState === 'playing' && game.player && game.player.ascendancy &&
            p.x >= ABILITY_BTN.x && p.x <= ABILITY_BTN.x + ABILITY_BTN.w &&
            p.y >= ABILITY_BTN.y && p.y <= ABILITY_BTN.y + ABILITY_BTN.h;
+  }
+
+  function overThumbCast(p) {
+    return game.gameState === 'playing' && game.player && game.player.ascendancy &&
+           p.x >= THUMB_CAST.x && p.y >= THUMB_CAST.y;
   }
 
   window.addEventListener('keydown', function (e) {
@@ -715,8 +723,9 @@
     var t = e.changedTouches[0];
     var p = toGameCoords(t.clientX, t.clientY);
     mouse.x = p.x; mouse.y = p.y;
-    // ability button eats the touch — don't start a joystick on it
-    if (overAbilityBtn(p)) { castAbility(); return; }
+    // ability button (or the right-thumb corner zone) eats the touch —
+    // don't start a joystick on it
+    if (overAbilityBtn(p) || overThumbCast(p)) { castAbility(); return; }
     touchCtl.active = true;
     touchCtl.id = t.identifier;
     touchCtl.ox = p.x; touchCtl.oy = p.y;
@@ -828,14 +837,14 @@
       tryPickClass(p.x, p.y);
     } else if (game.gameState === 'playing') {
       if (overAbilityBtn(p)) { castAbility(); return; }
-      // pause button hit-box (top-right, under the kill counter)
-      if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 18 && p.y <= 38) {
+      // pause button hit-box (top-right, under the score column)
+      if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 32 && p.y <= 52) {
         game.gameState = 'paused';
-      } else if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 40 && p.y <= 60) {
+      } else if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 54 && p.y <= 74) {
         toggleAllSound();
       }
     } else if (game.gameState === 'paused') {
-      if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 40 && p.y <= 60) toggleAllSound();
+      if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 54 && p.y <= 74) toggleAllSound();
       else game.gameState = 'playing';
     } else if (game.gameState === 'shop') {
       var acted = false;
@@ -4407,27 +4416,43 @@
   // ---------------------------------------------------------------------------
   // HUD
   // ---------------------------------------------------------------------------
+  // 10px pixel skull for the kill counter
+  function drawSkullIcon(x, y) {
+    ctx.fillStyle = '#dde4ec';
+    ctx.fillRect(x + 1, y, 8, 6);
+    ctx.fillRect(x + 2, y + 6, 6, 3);
+    ctx.fillStyle = '#0d0d1a';
+    ctx.fillRect(x + 2, y + 2, 2, 2);
+    ctx.fillRect(x + 6, y + 2, 2, 2);
+    ctx.fillRect(x + 4, y + 6, 1, 3);
+    ctx.fillRect(x + 6, y + 6, 1, 3);
+  }
+
+  // HUD: icon-first, three clusters — top-left vitals, top-right score
+  // column, bottom-left build cluster (ability + upgrade lines + level)
+  // over a thin XP bar.
   function renderHUD() {
     var p = game.player;
 
-    // ----- HP bar (top-left) -----
-    text('HP', 6, 6, 6, '#ffffff');
-    var segs = 20, segW = 8, segH = 6, gap = 1;
+    // ----- top-left: heart + slim HP segments, no text label -----
+    ctx.fillStyle = '#ff2d2d';
+    ctx.fillRect(7, 7, 3, 3); ctx.fillRect(12, 7, 3, 3);
+    ctx.fillRect(6, 9, 10, 3);
+    ctx.fillRect(8, 12, 6, 2);
+    ctx.fillRect(10, 14, 2, 1);
+    var segs = 20, segW = 8, segH = 5, gap = 1;
     var hpRatio = clamp(p.hp / p.maxHp, 0, 1);
     var filled = Math.round(segs * hpRatio);
     for (var i = 0; i < segs; i++) {
-      var sx = 6 + i * (segW + gap);
-      var sy = 16;
+      var sx = 21 + i * (segW + gap);
       ctx.fillStyle = '#000';
-      ctx.fillRect(sx + 1, sy + 1, segW, segH);
+      ctx.fillRect(sx + 1, 9, segW, segH);
       ctx.fillStyle = i < filled ? '#ff2d2d' : '#3a3a3a';
-      ctx.fillRect(sx, sy, segW, segH);
+      ctx.fillRect(sx, 8, segW, segH);
     }
 
-    // ----- wave (top-centre) -----
+    // ----- top-centre: wave + banners (unchanged) -----
     text('WAVE ' + pad(game.wave, 2), W / 2, 6, 12, '#ffe600', 'center');
-
-    // ----- the Keeper has fallen: announce the endless waves -----
     if (game.endlessBanner > 0) {
       ctx.globalAlpha = Math.min(1, game.endlessBanner / 1.2);
       text('THE VAULT IS BROKEN', W / 2, 88, 10, '#c9a227', 'center');
@@ -4435,96 +4460,86 @@
       text('HOW DEEP CAN YOU GO?', W / 2, 132, 6, '#bbbbbb', 'center');
       ctx.globalAlpha = 1;
     }
-
-    // ----- fading wave banner (continuous wave flow) -----
     if (game.waveBanner > 0) {
       ctx.globalAlpha = Math.min(1, game.waveBanner / 0.6);
       text('WAVE ' + pad(game.wave, 2), W / 2, 44, 16, '#FFD700', 'center');
       if (game.bossWave && game.boss) {
-        // name reveal in the boss's own colour
         text(game.boss.name, W / 2, 66, 10, game.boss.color, 'center');
       } else if (game.bossWave) {
         text('! BOSS !', W / 2, 66, 8, '#ff2d2d', 'center');
       }
       ctx.globalAlpha = 1;
     }
+    if (game.mode === 'daily') text('DAILY', W / 2, 22, 6, '#ff2dd0', 'center');
 
-    // ----- kills (top-right) -----
-    text('KILLS: ' + pad(game.score, 4), W - 6, 6, 8, '#ffffff', 'right');
-
-    // ----- run coins (under the kill counter) -----
+    // ----- top-right: unified score column, icon AFTER the number -----
+    text(pad(game.score, 4), W - 22, 5, 8, '#ffffff', 'right');
+    drawSkullIcon(W - 17, 3);
+    text(pad(Math.round(game.coinsEarned), 4), W - 22, 19, 7, '#FFD700', 'right');
     ctx.fillStyle = '#FFD700';
-    ctx.fillRect(W - 66, 21, 5, 5);
+    ctx.fillRect(W - 16, 19, 7, 7);
     ctx.fillStyle = '#aa8800';
-    ctx.fillRect(W - 65, 22, 3, 3);
-    text(pad(Math.round(game.coinsEarned), 4), W - 28, 20, 6, '#FFD700', 'right');
+    ctx.fillRect(W - 15, 20, 5, 5);
+    ctx.fillStyle = '#ffe98a';
+    ctx.fillRect(W - 15, 20, 2, 2);
 
-    // ----- daily-mode tag -----
-    if (game.mode === 'daily') {
-      text('DAILY', W / 2, 22, 6, '#ff2dd0', 'center');
-    }
-
-    // ----- pause button (clickable; P/ESC also work) -----
+    // ----- pause + sound, stacked under the score column -----
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(W - 23, 19, 18, 18);
+    ctx.fillRect(W - 23, 33, 18, 18);
     ctx.fillStyle = '#888888';
-    ctx.fillRect(W - 23, 19, 18, 1);
-    ctx.fillRect(W - 23, 36, 18, 1);
-    ctx.fillRect(W - 23, 19, 1, 18);
-    ctx.fillRect(W - 6, 19, 1, 18);
+    ctx.fillRect(W - 23, 33, 18, 1); ctx.fillRect(W - 23, 50, 18, 1);
+    ctx.fillRect(W - 23, 33, 1, 18); ctx.fillRect(W - 6, 33, 1, 18);
     ctx.fillStyle = '#cccccc';
-    ctx.fillRect(W - 18, 23, 3, 10);
-    ctx.fillRect(W - 13, 23, 3, 10);
-
-    // ----- sound button (below pause; crossed speaker = everything muted) -----
+    ctx.fillRect(W - 18, 37, 3, 10); ctx.fillRect(W - 13, 37, 3, 10);
     var sndMuted = musicMuted && sfxMuted;
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(W - 23, 41, 18, 18);
+    ctx.fillRect(W - 23, 55, 18, 18);
     ctx.fillStyle = '#888888';
-    ctx.fillRect(W - 23, 41, 18, 1);
-    ctx.fillRect(W - 23, 58, 18, 1);
-    ctx.fillRect(W - 23, 41, 1, 18);
-    ctx.fillRect(W - 6, 41, 1, 18);
-    // speaker: box + stepped cone
+    ctx.fillRect(W - 23, 55, 18, 1); ctx.fillRect(W - 23, 72, 18, 1);
+    ctx.fillRect(W - 23, 55, 1, 18); ctx.fillRect(W - 6, 55, 1, 18);
     ctx.fillStyle = sndMuted ? '#777777' : '#cccccc';
-    ctx.fillRect(W - 20, 47, 3, 6);
-    ctx.fillRect(W - 17, 45, 2, 10);
-    ctx.fillRect(W - 15, 43, 2, 14);
+    ctx.fillRect(W - 20, 61, 3, 6);
+    ctx.fillRect(W - 17, 59, 2, 10);
+    ctx.fillRect(W - 15, 57, 2, 14);
     if (sndMuted) {
-      // red slash across the speaker
       ctx.fillStyle = '#ff2d2d';
-      for (var sl2 = 0; sl2 < 12; sl2++) {
-        ctx.fillRect(W - 21 + sl2, 43 + sl2, 2, 2);
-      }
+      for (var sl2 = 0; sl2 < 12; sl2++) ctx.fillRect(W - 21 + sl2, 57 + sl2, 2, 2);
     } else {
-      // little sound waves
       ctx.fillStyle = '#cccccc';
-      ctx.fillRect(W - 11, 46, 1, 2);
-      ctx.fillRect(W - 11, 52, 1, 2);
-      ctx.fillRect(W - 9, 44, 1, 3);
-      ctx.fillRect(W - 9, 53, 1, 3);
+      ctx.fillRect(W - 11, 60, 1, 2); ctx.fillRect(W - 11, 66, 1, 2);
+      ctx.fillRect(W - 9, 58, 1, 3);  ctx.fillRect(W - 9, 67, 1, 3);
     }
 
-    // ----- XP bar (bottom-left, full width) -----
-    text('LVL ' + pad(game.level, 2), 6, H - 24, 6, '#ffffff');
-    var barX = 6, barY = H - 14, barW = W - 12, barH = 8;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
-    ctx.fillStyle = '#0a2a33';
-    ctx.fillRect(barX, barY, barW, barH);
-    var xpRatio = clamp(game.xp / xpForNext(), 0, 1);
-    ctx.fillStyle = '#00e5ff';
-    ctx.fillRect(barX, barY, Math.round(barW * xpRatio), barH);
-
-    // ----- active upgrades: horizontal icon row above the XP bar -----
-    // (was a right-side text list; icons keep the battlefield visible)
-    var keysList = Object.keys(p.upgradesTaken).filter(function (uid) {
-      return uid.indexOf('asc_') !== 0; // the ascendancy shows as the button, not an icon
+    // ----- bottom-left build cluster: ability heads the upgrade lines -----
+    var iy0 = H - 52;
+    if (p.ascendancy) {
+      var ready = p.abilityCd <= 0;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(6, iy0, 26, 26);
+      ctx.fillStyle = ready ? (game.blinkOn ? p.ascendancy.color : '#ffffff') : '#555566';
+      ctx.fillRect(6, iy0, 26, 1); ctx.fillRect(6, iy0 + 25, 26, 1);
+      ctx.fillRect(6, iy0, 1, 26); ctx.fillRect(31, iy0, 1, 26);
+      var abArt = CARD_ART[p.ascendancy.id];
+      if (abArt) {
+        if (!ready) ctx.globalAlpha = 0.4;
+        drawPixelIcon(abArt, 7, iy0 + 1, 2);
+        ctx.globalAlpha = 1;
+      }
+      if (!ready) {
+        var cdRatio = clamp(p.abilityCd / (p.abilityMaxCd || 1), 0, 1);
+        ctx.fillStyle = 'rgba(0,0,20,0.7)';
+        ctx.fillRect(7, iy0 + 1, 24, Math.round(24 * cdRatio));
+        text('' + Math.ceil(p.abilityCd), 19, iy0 + 9, 8, '#ffffff', 'center');
+      }
+    }
+    // upgrade icons: two lines beside the ability button
+    var v2Keys = Object.keys(p.upgradesTaken).filter(function (uid) {
+      return uid.indexOf('asc_') !== 0;
     });
-    var ix = 52, iy = H - 28, iMaxX = W - 56;
-    for (var k = 0; k < keysList.length; k++) {
-      var id = keysList[k];
-      if (ix > iMaxX) { ix = 52; iy -= 15; } // wrap to a row above when full
+    var ix = p.ascendancy ? 40 : 6, iy = iy0, iMaxX = W - 34;
+    for (var k = 0; k < v2Keys.length; k++) {
+      var id = v2Keys[k];
+      if (ix > iMaxX) { ix = p.ascendancy ? 40 : 6; iy += 14; }
       var art = CARD_ART[id];
       if (art) {
         drawPixelIcon(art, ix, iy, 1);
@@ -4535,52 +4550,33 @@
         ctx.fillStyle = def ? def.color : '#888888';
         ctx.fillRect(ix + 1, iy + 1, 10, 10);
       }
-      text('x' + p.upgradesTaken[id], ix + 13, iy + 4, 6, '#bbbbbb');
-      ix += 28;
+      text('x' + p.upgradesTaken[id], ix + 14, iy + 3, 6, '#bbbbbb');
+      ix += 30;
     }
 
-    // ----- current class (right end of the LVL line, clear of the ability button) -----
-    text('CLASS: ' + currentClass.toUpperCase(), W - 46, H - 24, 6, '#777777', 'right');
+    // ----- level + class, one quiet line above the XP bar -----
+    text('LVL ' + pad(game.level, 2) + ' - ' + currentClass.toUpperCase(), 6, H - 18, 6, '#bbbbbb');
 
-    // ----- ascendancy ability button (bottom-right, above the XP bar) -----
-    if (p.ascendancy) {
-      var ab = ABILITY_BTN;
-      var ready = p.abilityCd <= 0;
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillRect(ab.x, ab.y, ab.w, ab.h);
-      // border pulses in the ascendancy colour when the active is ready
-      ctx.fillStyle = ready ? (game.blinkOn ? p.ascendancy.color : '#ffffff') : '#555566';
-      ctx.fillRect(ab.x, ab.y, ab.w, 1);
-      ctx.fillRect(ab.x, ab.y + ab.h - 1, ab.w, 1);
-      ctx.fillRect(ab.x, ab.y, 1, ab.h);
-      ctx.fillRect(ab.x + ab.w - 1, ab.y, 1, ab.h);
-      var abArt = CARD_ART[p.ascendancy.id];
-      if (abArt) {
-        if (!ready) ctx.globalAlpha = 0.4;
-        drawPixelIcon(abArt, ab.x + 5, ab.y + 5, 2);
-        ctx.globalAlpha = 1;
-      }
-      if (!ready) {
-        // cooldown sweep: dark fill drains downward as it recharges
-        var cdRatio = clamp(p.abilityCd / (p.abilityMaxCd || 1), 0, 1);
-        ctx.fillStyle = 'rgba(0,0,20,0.7)';
-        ctx.fillRect(ab.x + 1, ab.y + 1, ab.w - 2, Math.round((ab.h - 2) * cdRatio));
-        text('' + Math.ceil(p.abilityCd), ab.x + ab.w / 2, ab.y + ab.h / 2 - 4, 8, '#ffffff', 'center');
-      } else {
-        text('SPC', ab.x + ab.w / 2, ab.y + ab.h - 8, 6, p.ascendancy.color, 'center');
-      }
-    }
+    // ----- thin XP bar -----
+    var barX = 6, barY = H - 9, barW = W - 12, barH = 3;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+    ctx.fillStyle = '#0a2a33';
+    ctx.fillRect(barX, barY, barW, barH);
+    var xpRatio = clamp(game.xp / xpForNext(), 0, 1);
+    ctx.fillStyle = '#00e5ff';
+    ctx.fillRect(barX, barY, Math.round(barW * xpRatio), barH);
 
-    // ----- boss health bar (only while a boss is alive) -----
+    // ----- boss health bar (unchanged) -----
     if (game.bossWave && game.boss) {
-      var bw = 200, bh = 10, bx = (W - bw) / 2, by = 24;
-      text(game.boss.name || 'BOSS', bx - 4, by + 2, 6, game.boss.color, 'right');
-      ctx.fillStyle = '#FFD700';                 // 1px gold border
-      ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
-      ctx.fillStyle = '#3a0000';                 // dark red bg
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.fillStyle = '#ff2d2d';                 // bright red fill
-      ctx.fillRect(bx, by, Math.round(bw * clamp(game.boss.hp / game.boss.maxHp, 0, 1)), bh);
+      var bw2 = 200, bh2 = 10, bx2 = (W - bw2) / 2, by2 = 24;
+      text(game.boss.name || 'BOSS', bx2 - 4, by2 + 2, 6, game.boss.color, 'right');
+      ctx.fillStyle = '#FFD700';
+      ctx.fillRect(bx2 - 1, by2 - 1, bw2 + 2, bh2 + 2);
+      ctx.fillStyle = '#3a0000';
+      ctx.fillRect(bx2, by2, bw2, bh2);
+      ctx.fillStyle = '#ff2d2d';
+      ctx.fillRect(bx2, by2, Math.round(bw2 * clamp(game.boss.hp / game.boss.maxHp, 0, 1)), bh2);
     }
   }
 

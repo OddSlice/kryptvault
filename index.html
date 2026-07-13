@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.6c';
+  var GAME_VERSION = '0.6d';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -583,7 +583,7 @@
   var mouse = { x: 0, y: 0 };
   // on-screen ability button (bottom-left, heading the upgrade line);
   // desktop can just press SPACE
-  var ABILITY_BTN = { x: 6, y: H - 47, w: 26, h: 26 };
+  var ABILITY_BTN = { x: 6, y: H - 45, w: 26, h: 26 };
   // generous invisible tap zone in the bottom-right corner so right thumbs
   // can still cast on touch devices (the button itself draws bottom-left)
   var THUMB_CAST = { x: W - 60, y: H - 60, w: 60, h: 60 };
@@ -4434,17 +4434,12 @@
   function renderHUD() {
     var p = game.player;
 
-    // ----- top-left: heart + slim HP segments, no text label -----
-    ctx.fillStyle = '#ff2d2d';
-    ctx.fillRect(7, 7, 3, 3); ctx.fillRect(12, 7, 3, 3);
-    ctx.fillRect(6, 9, 10, 3);
-    ctx.fillRect(8, 12, 6, 2);
-    ctx.fillRect(10, 14, 2, 1);
+    // ----- top-left: slim HP segments, no label — red bar says it all -----
     var segs = 20, segW = 8, segH = 5, gap = 1;
     var hpRatio = clamp(p.hp / p.maxHp, 0, 1);
     var filled = Math.round(segs * hpRatio);
     for (var i = 0; i < segs; i++) {
-      var sx = 21 + i * (segW + gap);
+      var sx = 6 + i * (segW + gap);
       ctx.fillStyle = '#000';
       ctx.fillRect(sx + 1, 9, segW, segH);
       ctx.fillStyle = i < filled ? '#ff2d2d' : '#3a3a3a';
@@ -4511,7 +4506,7 @@
     }
 
     // ----- bottom-left build cluster: ability heads the upgrade lines -----
-    var iy0 = H - 47;
+    var iy0 = H - 45;
     if (p.ascendancy) {
       var ready = p.abilityCd <= 0;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -4539,7 +4534,7 @@
     });
     var ixStart = p.ascendancy ? 40 : 6;
     var perRow = Math.max(1, Math.floor((W - 34 - ixStart) / 30) + 1);
-    var iconBase = H - 33; // bottom row sits right above 'LVL NN - CLASS'
+    var iconBase = H - 31; // bottom row sits tight above the LVL line
     for (var k = 0; k < v2Keys.length; k++) {
       var id = v2Keys[k];
       var ix = ixStart + (k % perRow) * 30;
@@ -4557,8 +4552,8 @@
       text('x' + p.upgradesTaken[id], ix + 14, iy + 3, 6, '#bbbbbb');
     }
 
-    // ----- level + class, one quiet line above the XP bar -----
-    text('LVL ' + pad(game.level, 2) + ' - ' + currentClass.toUpperCase(), 6, H - 18, 6, '#bbbbbb');
+    // ----- level, one quiet line above the XP bar -----
+    text('LVL ' + pad(game.level, 2), 6, H - 17, 6, '#bbbbbb');
 
     // ----- thin XP bar -----
     var barX = 6, barY = H - 9, barW = W - 12, barH = 3;

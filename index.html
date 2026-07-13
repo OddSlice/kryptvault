@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.6e';
+  var GAME_VERSION = '0.6f';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -583,7 +583,7 @@
   var mouse = { x: 0, y: 0 };
   // on-screen ability button (bottom-left, heading the upgrade line);
   // desktop can just press SPACE
-  var ABILITY_BTN = { x: 6, y: H - 46, w: 26, h: 26 };
+  var ABILITY_BTN = { x: 6, y: H - 44, w: 26, h: 26 };
   // generous invisible tap zone in the bottom-right corner so right thumbs
   // can still cast on touch devices (the button itself draws bottom-left)
   var THUMB_CAST = { x: W - 60, y: H - 60, w: 60, h: 60 };
@@ -4506,16 +4506,18 @@
     }
 
     // ----- bottom-left build cluster -----
-    // Spell button lives in its own corner ABOVE the LVL line; the first
-    // upgrade row sits BESIDE the LVL text and rows stack up from there.
-    var iy0 = H - 46; // spell button top — clear of the LVL line below it
+    // 26px spell button in the corner; two upgrade rows share the button's
+    // exact height beside it (bottom-aligned), stacking further rows upward.
+    var BTN = 26, CELL = 32, ROW = 13; // icon pitch + row height
+    var clB = H - 18;                  // shared bottom baseline of the cluster
+    var iy0 = clB - BTN;               // spell button top
     if (p.ascendancy) {
       var ready = p.abilityCd <= 0;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillRect(6, iy0, 26, 26);
+      ctx.fillRect(6, iy0, BTN, BTN);
       ctx.fillStyle = ready ? (game.blinkOn ? p.ascendancy.color : '#ffffff') : '#555566';
-      ctx.fillRect(6, iy0, 26, 1); ctx.fillRect(6, iy0 + 25, 26, 1);
-      ctx.fillRect(6, iy0, 1, 26); ctx.fillRect(31, iy0, 1, 26);
+      ctx.fillRect(6, iy0, BTN, 1); ctx.fillRect(6, iy0 + BTN - 1, BTN, 1);
+      ctx.fillRect(6, iy0, 1, BTN); ctx.fillRect(6 + BTN - 1, iy0, 1, BTN);
       var abArt = CARD_ART[p.ascendancy.id];
       if (abArt) {
         if (!ready) ctx.globalAlpha = 0.4;
@@ -4529,17 +4531,17 @@
         text('' + Math.ceil(p.abilityCd), 19, iy0 + 9, 8, '#ffffff', 'center');
       }
     }
-    // upgrade icons: first row sits beside the LVL text, rows stack upward
+    // upgrade icons: two rows aligned to the button, growing upward
     var v2Keys = Object.keys(p.upgradesTaken).filter(function (uid) {
       return uid.indexOf('asc_') !== 0;
     });
-    var ixStart = 42; // clear the 'LVL NNN' text on the left
-    var perRow = Math.max(1, Math.floor((W - 34 - ixStart) / 30) + 1);
-    var iconBase = H - 25; // bottom row aligns with the LVL line beside it
+    var ixStart = 6 + BTN + 8;          // 8px margin past the spell button
+    var perRow = Math.max(1, Math.floor((W - 8 - ixStart) / CELL));
+    var iconBase = clB - 12;            // bottom icon row bottom-aligned
     for (var k = 0; k < v2Keys.length; k++) {
       var id = v2Keys[k];
-      var ix = ixStart + (k % perRow) * 30;
-      var iy = iconBase - Math.floor(k / perRow) * 14;
+      var ix = ixStart + (k % perRow) * CELL;
+      var iy = iconBase - Math.floor(k / perRow) * ROW;
       var art = CARD_ART[id];
       if (art) {
         drawPixelIcon(art, ix, iy, 1);
@@ -4553,8 +4555,8 @@
       text('x' + p.upgradesTaken[id], ix + 14, iy + 3, 6, '#bbbbbb');
     }
 
-    // ----- level, one quiet line above the XP bar -----
-    text('LVL ' + pad(game.level, 2), 6, H - 17, 6, '#bbbbbb');
+    // ----- level, one quiet line below the spell button -----
+    text('LVL ' + pad(game.level, 2), 6, H - 16, 6, '#bbbbbb');
 
     // ----- thin XP bar -----
     var barX = 6, barY = H - 9, barW = W - 12, barH = 3;

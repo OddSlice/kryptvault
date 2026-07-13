@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.6b';
+  var GAME_VERSION = '0.6c';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -583,7 +583,7 @@
   var mouse = { x: 0, y: 0 };
   // on-screen ability button (bottom-left, heading the upgrade line);
   // desktop can just press SPACE
-  var ABILITY_BTN = { x: 6, y: H - 52, w: 26, h: 26 };
+  var ABILITY_BTN = { x: 6, y: H - 47, w: 26, h: 26 };
   // generous invisible tap zone in the bottom-right corner so right thumbs
   // can still cast on touch devices (the button itself draws bottom-left)
   var THUMB_CAST = { x: W - 60, y: H - 60, w: 60, h: 60 };
@@ -4511,7 +4511,7 @@
     }
 
     // ----- bottom-left build cluster: ability heads the upgrade lines -----
-    var iy0 = H - 52;
+    var iy0 = H - 47;
     if (p.ascendancy) {
       var ready = p.abilityCd <= 0;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -4532,14 +4532,18 @@
         text('' + Math.ceil(p.abilityCd), 19, iy0 + 9, 8, '#ffffff', 'center');
       }
     }
-    // upgrade icons: two lines beside the ability button
+    // upgrade icons: anchored to the bottom row just above the LVL line,
+    // growing UPWARD as the build fills out (no dead gap on small builds)
     var v2Keys = Object.keys(p.upgradesTaken).filter(function (uid) {
       return uid.indexOf('asc_') !== 0;
     });
-    var ix = p.ascendancy ? 40 : 6, iy = iy0, iMaxX = W - 34;
+    var ixStart = p.ascendancy ? 40 : 6;
+    var perRow = Math.max(1, Math.floor((W - 34 - ixStart) / 30) + 1);
+    var iconBase = H - 33; // bottom row sits right above 'LVL NN - CLASS'
     for (var k = 0; k < v2Keys.length; k++) {
       var id = v2Keys[k];
-      if (ix > iMaxX) { ix = p.ascendancy ? 40 : 6; iy += 14; }
+      var ix = ixStart + (k % perRow) * 30;
+      var iy = iconBase - Math.floor(k / perRow) * 14;
       var art = CARD_ART[id];
       if (art) {
         drawPixelIcon(art, ix, iy, 1);
@@ -4551,7 +4555,6 @@
         ctx.fillRect(ix + 1, iy + 1, 10, 10);
       }
       text('x' + p.upgradesTaken[id], ix + 14, iy + 3, 6, '#bbbbbb');
-      ix += 30;
     }
 
     // ----- level + class, one quiet line above the XP bar -----

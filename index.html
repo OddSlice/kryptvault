@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.7b';
+  var GAME_VERSION = '0.8';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -1044,7 +1044,7 @@
     { id: 'health',    name: 'HEALTH UP',  desc: '+30 max HP, heal half your missing HP', con: '-5 MOVE SPEED', detail: 'STACKS x30', color: '#1dd1a1', cap: 30 },
     { id: 'movespeed', name: 'MOVE SPD',   desc: '+20 move speed',         con: '-10 MAX HP',      detail: 'STACKS x8',              color: '#54a0ff', cap: 8 },
     { id: 'pierce',    name: 'PIERCE',     desc: 'Shots pierce +1 foe',    con: '-10% DAMAGE',     detail: 'STACKS x8',              color: '#48dbfb', cap: 8 },
-    { id: 'vampire',   name: 'VAMPIRE',    desc: 'Heal 3 HP per kill',     con: '-15 MAX HP',      detail: 'STACKS x10',             color: '#ee5253', cap: 10 },
+    { id: 'vampire',   name: 'VAMPIRE',    desc: 'Heal 3 HP per kill',     con: '-15 MAX HP',      detail: 'STACKS x10 - HEAL CAPPED /SEC', color: '#ee5253', cap: 10 },
     { id: 'xpmagnet',  name: 'XP MAGNET',  desc: '+20% XP from kills',     con: 'FOES +4% SPEED',  detail: 'STACKS x5',              color: '#5f27cd', cap: 5 },
     { id: 'shotgun',   name: 'SHOTGUN',    desc: '4 heavy pellets knock foes back', con: 'FIRE 0.1s SLOWER', detail: 'STACKS: +1 PELLET', color: '#ff9f1c', cap: 6 },
     { id: 'homing',    name: 'HOMING SHOT',desc: 'Shots seek foes',        con: 'SHOTS 15% SLOWER', detail: 'STACKS: STRONGER SEEK', color: '#2ec4b6', cap: 4 },
@@ -1697,7 +1697,7 @@
     // Bombardier: coin-unlocked 5th class — sturdy bruiser who lobs slow arcing
     // bombs; EVERY kill detonates an AoE that can chain-clear a crowd. Solid
     // direct damage, but slow fire is his balancing weakness. Drawn procedurally.
-    { id: 'bombardier', name: 'BOMBARDIER', color: '#ff8c1a', hp: 130, speed: 66, damage: 30, cooldown: 1.15, pierce: 0, homingBase: 0, bars: [4, 2, 4], tile: null, shotSpeed: 150, price: 5000, killBoom: { dmg: 40, radius: 34 } }
+    { id: 'bombardier', name: 'BOMBARDIER', color: '#ff8c1a', hp: 130, speed: 66, damage: 38, cooldown: 1.15, pierce: 0, homingBase: 0, bars: [4, 2, 4], tile: null, shotSpeed: 180, price: 5000, killBoom: { dmg: 40, radius: 34 } }
   ];
 
   function classDef(id) {
@@ -1997,6 +1997,8 @@
       retribution: 0,    // thorns stacks
       boomRadiusMult: 1, // bombardier DEMOLITIONIST passive scales kill-blasts
       chainBonus: 0,     // bombardier CHAIN REACTOR passive: +1 wider ring
+      vampBudget: 0,     // lifesteal available this second (refilled in update)
+      vampTick: 0,       // refill timer
       // ascendancy (subclass drafted after the first boss)
       ascendancy: null,  // the chosen ASCENDANCIES entry
       abilityCd: 0,      // seconds until the active can fire again
@@ -2802,6 +2804,12 @@
     var p = game.player;
     if (p.invuln > 0) p.invuln -= dt;
     if (p.abilityCd > 0) p.abilityCd -= dt;
+    // vampire lifesteal budget refills once a second: 10 + 2 per stack
+    p.vampTick -= dt;
+    if (p.vampTick <= 0) {
+      p.vampTick = 1;
+      p.vampBudget = 10 + 2 * (p.vampire / 3);
+    }
 
     // ----- juggernaut charge: unstoppable, tramples everything in the path -----
     if (p.chargeT > 0) {
@@ -3464,7 +3472,13 @@
     var p = game.player;
     gainXP((en.xpVal || en.maxHp / 5) * p.xpMult);
     if (p.vampire > 0) {
-      p.hp = Math.min(p.maxHp, p.hp + p.vampire * p.healMult);
+      // v0.8: lifesteal is budgeted per second (10 + 2/stack) — kills/sec
+      // no longer scale healing without limit, which was the immortality loop
+      var vHeal = Math.min(p.vampire * p.healMult, p.vampBudget || 0);
+      if (vHeal > 0) {
+        p.vampBudget -= vHeal;
+        p.hp = Math.min(p.maxHp, p.hp + vHeal);
+      }
     }
     game.score++;
     game.waveKills++;
@@ -5136,7 +5150,7 @@
     // ----- damage attribution: a stacked bar (what actually carried the run) -----
     if (game.dmgDealt > 0) {
       var order = ['shot', 'orb', 'static', 'bomb', 'ability', 'pact', 'other'];
-      var labels = { shot: 'SHOTS', orb: 'ORBS', static: 'STATIC', bomb: 'BOMB', ability: 'ABILITY', pact: 'CURSES', other: 'OTHER' };
+      var labels = { shot: 'SHOTS', orb: 'ORBS', static: 'STATIC', bomb: 'BOMB', ability: 'ABILITY', pact: 'BLASTS', other: 'OTHER' };
       var cols = { shot: '#ffe600', orb: '#00e5ff', static: '#f5f76e', bomb: '#ff9f1c', ability: '#ff2dd0', pact: '#9b59b6', other: '#9fb0c0' };
       var parts = [];
       for (var di = 0; di < order.length; di++) {

@@ -12,7 +12,11 @@ const CLASSES = {
   rogue:   { hp: 70,  speed: 125, damage: 14, cooldown: 0.4, pierce: 0, homingBase: 0,    shotSpeed: 200, dr: 0 },
   mage:    { hp: 80,  speed: 70,  damage: 40, cooldown: 1.0, pierce: 1, homingBase: 0.06, shotSpeed: 200, dr: 0 },
   ranger:  { hp: 65,  speed: 90,  damage: 34, cooldown: 0.9, pierce: 2, homingBase: 0,    shotSpeed: 340, dr: 0 },
+  bombardier: { hp: 130, speed: 66, damage: 38, cooldown: 1.15, pierce: 0, homingBase: 0, shotSpeed: 180, dr: 0, killBoom: { dmg: 40, radius: 34 } },
 };
+
+// v0.8 SHIPPED: vampire heal-per-second cap (10 + 2*stacks) is now the game.
+const VAMP_NERF = true;
 
 function enemyMix(w) {
   const mix = [];
@@ -45,7 +49,7 @@ function spawnInterval(w, haste, bossWave) {
 }
 function contactDmg(w) { return 10 + Math.floor(w / 3) * 3; }
 function xpForNext(level) { return 30 + level * 45 + level * level * 8; }
-function bossHp(w, curseHpMult) { return (600 + w * 80) * 1.3 * curseHpMult; }
+function bossHp(w, curseHpMult) { var h = (600 + w * 80) * 1.3 * curseHpMult; return w === 50 ? h * 2.2 : h; }
 
 // ---------- v0.5 upgrade pool ----------
 const POOL = {
@@ -129,6 +133,11 @@ function playerDps(p, density, wave) {
   if (p.pactLvl > 0) {
     dps *= 1 + Math.min(0.35, 0.12 * p.pactLvl) * Math.min(1, density / 15);
   }
+  // bombardier innate kill-boom: every kill detonates 40dmg AoE and chains
+  if (p.killBoom) {
+    var kbMult = (p.boomRadiusMult || 1);
+    dps *= 1 + 0.45 * Math.min(1, density / 12) * kbMult + (p.chainBonus ? 0.18 : 0);
+  }
   // ascendancy actives, averaged over cooldown
   if (p.asc === 'berserker') dps += 80 * Math.min(density * 0.4, 8) / 10;
   if (p.asc === 'lightmage') dps += 90 * Math.min(density * 0.3, 6) / 8;
@@ -136,6 +145,8 @@ function playerDps(p, density, wave) {
   if (p.asc === 'sniper')    dps += p.damage * 3 * (1 + Math.min(4, density / 8)) / 7;
   if (p.asc === 'trapper')   dps += 25 * Math.min(density * 0.3, 6) / 0.5 * (4 / 9) * 0.4;
   if (p.asc === 'juggernaut')dps += 60 * Math.min(density * 0.4, 6) / 8;
+  if (p.asc === 'demolitionist') dps += 220 * (1 + Math.min(5, density / 6)) / 8;
+  if (p.asc === 'chainreactor')  dps += 90 * Math.min(density, 25) / 10;
   return dps * critF * seekF;
 }
 
@@ -185,6 +196,7 @@ function makePlayer(cls) {
     seekerSwarm: 0, bladeOrbit: 0, railgun: 0, bulletstorm: 0, deathseeker: 0,
     critChance: 0, critMult: 2, projSize: 0, armor: 0, lucky: 0,
     pactLvl: 0, retribution: 0, asc: null, taken: {},
+    killBoom: c.killBoom || null, boomRadiusMult: 1, chainBonus: 0,
   };
 }
 
@@ -241,6 +253,7 @@ function pickCard(offered, prio, p, g) {
 const ASC_MAP = {
   warrior: ['juggernaut', 'berserker'], rogue: ['phantom', 'assassin'],
   mage: ['frostmage', 'lightmage'], ranger: ['sniper', 'trapper'],
+  bombardier: ['demolitionist', 'chainreactor'],
 };
 
 function ascFor(cls) {
@@ -257,6 +270,8 @@ function applyAsc(p, id) {
   if (id === 'lightmage') p.homingBase = Math.max(p.homingBase, 0.10);
   if (id === 'sniper') p.shotSpeed = Math.round(p.shotSpeed * 1.25);
   if (id === 'trapper') p.pierce += 1;
+  if (id === 'demolitionist') p.boomRadiusMult = 1.4;
+  if (id === 'chainreactor') p.chainBonus = 1;
 }
 
 function simulateRun(cls, stratName, poolIds, maxWave = 200) {
@@ -309,7 +324,9 @@ function simulateRun(cls, stratName, poolIds, maxWave = 200) {
       pickCard(off, prio, p, g);
     }
     const inc = incomingDps(p, g, density, wave, hitsPerSec);
-    const heal = p.vampire * p.healMult * killRate;
+    // p.vampire is already heal-per-kill (3 per stack)
+    let heal = p.vampire * p.healMult * killRate;
+    if (VAMP_NERF) heal = Math.min(heal, (10 + 2 * (p.vampire / 3)) * p.healMult);
     // potions: ~4% base drop doubled per lucky stack (capped), heal 25
     const luckyF = Math.min(4, Math.pow(2, p.lucky));
     const potions = killRate * 0.04 * luckyF * 25 * p.healMult * 0.6;

@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.7';
+  var GAME_VERSION = '0.7a';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@
   _skinCtx.imageSmoothingEnabled = false;
 
   function drawTintedTile(tile, dx, dy, dw, dh, flip, tint, alpha) {
-    if (useProceduralSprites || !sheetReady) return false;
+    if (!tile || useProceduralSprites || !sheetReady) return false;
     _skinCtx.clearRect(0, 0, 16, 16);
     _skinCtx.globalCompositeOperation = 'source-over';
     _skinCtx.globalAlpha = 1;
@@ -3973,32 +3973,35 @@
     ctx.fillRect(W - 4, 4, 4, H - 8);
   }
 
-  // THE BOMBARDIER: no sheet sprite, so drawn procedurally — a stout helmeted
-  // sapper in an orange vest cradling a fuse-lit bomb.
+  // THE BOMBARDIER: no sheet sprite, so drawn procedurally at any position and
+  // scale — a stout helmeted sapper in an orange vest cradling a fuse-lit bomb.
+  // Reused by the player, the class-select card, and the wardrobe preview.
+  function drawBombardierAt(cx, cy, u, f, vest) {
+    function R(ox, oy, w, h, col) {
+      ctx.fillStyle = col;
+      ctx.fillRect(Math.round(cx + ox * u), Math.round(cy + oy * u), Math.ceil(w * u), Math.ceil(h * u));
+    }
+    R(-4, 5, 3, 3, '#3a2a20'); R(1, 5, 3, 3, '#3a2a20');       // legs
+    R(-5, -3, 10, 9, vest);                                     // vest / body
+    R(-5, -3, 10, 2, 'rgba(0,0,0,0.28)');                       // vest shade
+    R(-4, -2, 2, 8, '#5a3a20');                                 // bandolier strap
+    R(-5, -8, 10, 5, '#2a2a35');                                // helmet
+    R(-5, -8, 10, 1, '#454555');                                // helmet rim
+    R(f > 0 ? 1 : -3, -6, 2, 2, '#ffe08a');                     // goggle eye
+    var bx = f * 6;                                             // bomb out front
+    R(bx - 2, 1, 5, 5, '#1a1a22');
+    R(bx - 1, 2, 2, 2, '#3a3a48');
+    R(bx + f, -1, 1, 2, '#ff9f1c');                             // fuse
+    if (game.time % 0.4 < 0.2) R(bx + f, -2, 1, 1, '#ffe600');  // spark
+  }
+
+  function bombardierVest() {
+    var s = skinById('bombardier', equippedSkinId('bombardier'));
+    return s && s.chroma ? chromaColor() : (s && s.tint ? s.tint : '#ff8c1a');
+  }
+
   function drawBombardierSprite(p, bob) {
-    var f = p.facing;
-    var cx = Math.round(p.x), cy = Math.round(p.y) + bob;
-    // equipped skin recolours the vest
-    var bSkin = skinById('bombardier', equippedSkinId('bombardier'));
-    var vest = bSkin && bSkin.chroma ? chromaColor() : (bSkin && bSkin.tint ? bSkin.tint : '#ff8c1a');
-    // legs
-    ctx.fillStyle = '#3a2a20'; ctx.fillRect(cx - 4, cy + 5, 3, 3); ctx.fillRect(cx + 1, cy + 5, 3, 3);
-    // vest / body
-    ctx.fillStyle = vest; ctx.fillRect(cx - 5, cy - 3, 10, 9);
-    ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(cx - 5, cy - 3, 10, 2); // vest shade
-    // bandolier strap
-    ctx.fillStyle = '#5a3a20'; ctx.fillRect(cx - 4, cy - 2, 2, 8);
-    // dark helmet
-    ctx.fillStyle = '#2a2a35'; ctx.fillRect(cx - 5, cy - 8, 10, 5);
-    ctx.fillStyle = '#454555'; ctx.fillRect(cx - 5, cy - 8, 10, 1);
-    // goggle eye (faces move dir)
-    ctx.fillStyle = '#ffe08a'; ctx.fillRect(cx + (f > 0 ? 1 : -3), cy - 6, 2, 2);
-    // the bomb he cradles, out front
-    var bx = cx + f * 6;
-    ctx.fillStyle = '#1a1a22'; ctx.fillRect(bx - 2, cy + 1, 5, 5);
-    ctx.fillStyle = '#3a3a48'; ctx.fillRect(bx - 1, cy + 2, 2, 2);
-    ctx.fillStyle = '#ff9f1c'; ctx.fillRect(bx + f, cy - 1, 1, 2);   // fuse
-    if (game.time % 0.4 < 0.2) { ctx.fillStyle = '#ffe600'; ctx.fillRect(bx + f, cy - 2, 1, 1); } // spark
+    drawBombardierAt(Math.round(p.x), Math.round(p.y) + bob, 1, p.facing, bombardierVest());
   }
 
   function drawPlayer() {
@@ -5420,18 +5423,25 @@
     }
   }
 
+  // Unified coin balance: gold coin icon + number, centred as a group at cx.
+  // Used everywhere a coin total is shown so the display is consistent.
+  function drawCoinBalance(cx, y) {
+    var s = String(Math.round(runData.coins));
+    var groupW = 8 + s.length * 6;
+    var lx = Math.round(cx - groupW / 2);
+    ctx.fillStyle = '#FFD700'; ctx.fillRect(lx, y - 1, 6, 6);
+    ctx.fillStyle = '#aa8800'; ctx.fillRect(lx + 1, y, 4, 4);
+    ctx.fillStyle = '#ffe98a'; ctx.fillRect(lx + 1, y, 2, 2);
+    text(s, lx + 10, y, 6, '#FFD700');
+  }
+
   function renderClassSelect() {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
     drawAnimatedScanlines(0.05);
 
     text('CHOOSE YOUR CLASS', W / 2, 24, 10, '#FFD700', 'center');
-    // coin balance (matters for the coin-unlocked classes)
-    ctx.fillStyle = '#FFD700';
-    ctx.fillRect(W / 2 - 44, 46, 5, 5);
-    ctx.fillStyle = '#aa8800';
-    ctx.fillRect(W / 2 - 43, 47, 3, 3);
-    text(Math.round(runData.coins) + ' COINS', W / 2 - 34, 45, 6, '#FFD700');
+    drawCoinBalance(W / 2, 45);
 
     var labels = ['HP', 'SPD', 'PWR'];
     for (var i = 0; i < classCards.length; i++) {
@@ -5450,8 +5460,11 @@
 
       // hero sprite centred; weapon icon tucked in the corner
       var spx = Math.round(c.x + c.w / 2 - 16);
-      if (drawTile(cls.tile, spx, c.y + 22, 32, 32, false)) {
-        drawClassIcon(cls.id, c.x + c.w - 36, c.y + 20);
+      if (cls.id === 'bombardier') {
+        drawBombardierAt(c.x + c.w / 2, c.y + 40, 2, 1, '#ff8c1a');
+        drawClassIcon(cls.id, c.x + c.w - 34, c.y + 18);
+      } else if (drawTile(cls.tile, spx, c.y + 22, 32, 32, false)) {
+        drawClassIcon(cls.id, c.x + c.w - 34, c.y + 18);
       } else {
         drawClassIcon(cls.id, c.x + c.w / 2 - 20, c.y + 22);
       }
@@ -5489,6 +5502,13 @@
           text('UNLOCK', lx, c.y + 110, 6, '#ffffff', 'center');
           text(cls.price + 'c', lx, c.y + 124, 8, '#FFD700', 'center');
         }
+      }
+
+      // owned classes: a short playstyle tag fills the lower panel
+      if (owned) {
+        var BLURBS = { warrior: 'FRONTLINE', rogue: 'HIT & RUN', mage: 'AOE SPELLS',
+                       ranger: 'LONG RANGE', bombardier: 'EXPLOSIONS' };
+        text(BLURBS[cls.id] || '', c.x + c.w / 2, c.y + 116, 6, cls.color, 'center');
       }
 
       // name + number on top so they stay crisp over the lock overlay
@@ -5601,6 +5621,11 @@
 
   // draw a class hero sprite with a skin applied, at (x,y,size)
   function drawSkinPreview(classId, skin, x, y, size) {
+    if (classId === 'bombardier') {
+      var bv = skin.chroma ? chromaColor() : (skin.tint || '#ff8c1a');
+      drawBombardierAt(x + size / 2, y + size / 2, size / 16, 1, bv);
+      return;
+    }
     var tile = classDef(classId).tile;
     var tint = skin.chroma ? chromaColor() : skin.tint;
     if (tint) {
@@ -5664,10 +5689,10 @@
     ctx.fillRect(0, 0, W, H);
     drawAnimatedScanlines(0.05);
     text('SKINS', W / 2, 10, 10, '#FFD700', 'center');
-    text(Math.round(runData.coins) + 'c', W / 2, 30, 6, '#FFD700', 'center');
+    drawCoinBalance(W / 2, 30);
 
     // character selector
-    var tabW = 108, gap = 6, total = CLASSES.length * tabW + (CLASSES.length - 1) * gap;
+    var tabW = 88, gap = 5, total = CLASSES.length * tabW + (CLASSES.length - 1) * gap;
     var tx0 = (W - total) / 2;
     for (var ci = 0; ci < CLASSES.length; ci++) {
       var cls = CLASSES[ci];

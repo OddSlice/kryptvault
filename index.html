@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.7a';
+  var GAME_VERSION = '0.7b';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -5506,7 +5506,7 @@
 
       // owned classes: a short playstyle tag fills the lower panel
       if (owned) {
-        var BLURBS = { warrior: 'FRONTLINE', rogue: 'HIT & RUN', mage: 'AOE SPELLS',
+        var BLURBS = { warrior: 'FRONTLINE', rogue: 'HIT & RUN', mage: 'ARCANE PIERCE',
                        ranger: 'LONG RANGE', bombardier: 'EXPLOSIONS' };
         text(BLURBS[cls.id] || '', c.x + c.w / 2, c.y + 116, 6, cls.color, 'center');
       }

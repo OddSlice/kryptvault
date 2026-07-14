@@ -14,6 +14,9 @@ let script = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script
 script = script.replace(/\}\)\(\);\s*$/,
   'window.__hooks = { game: game, beginWave: beginWave, killBoss: killBoss, ' +
   'currentBiome: currentBiome, startGame: startGame, spawnBoss: spawnBoss, ' +
+  'applyAscendancy: applyAscendancy, castAbility: castAbility, ASCENDANCIES: ASCENDANCIES, ' +
+  'spawnEnemyAt: spawnEnemyAt, enemyTypeForWave: enemyTypeForWave, ' +
+  'setClass: function(id){ currentClass = id; }, ' +
   'selectClass: function(i){ selectClassByIndex(i); }, walls: function(){ return walls; } };\n})();');
 
 // ---------- DOM / browser stubs ----------
@@ -150,7 +153,31 @@ try {
   if (Object.keys(k55).length) throw new Error('endless waves must be solid, got ' + JSON.stringify(k55));
   console.log('wave 55 blocks: {} (solid, as designed)');
 
-  console.log('PASS: no exceptions through Keeper fight, endless transition, and all block kinds');
+  // BOMBARDIER (v0.7): kill-blasts + both ascendancy actives
+  H.setClass('bombardier');
+  H.startGame();
+  H.game.gameState = 'playing';
+  const bp = H.game.player;
+  if (bp.hp !== 130) throw new Error('bombardier hp = ' + bp.hp + ' (expected 130)');
+  // pack the arena so kills chain
+  for (let i = 0; i < 20; i++) H.spawnEnemyAt('skeleton', 100 + (i % 6) * 40, 90 + Math.floor(i / 6) * 40);
+  bp.damage = 500; // force kills so the on-kill booms + chains fire
+  pump(300);
+  console.log('bombardier: 5s combat, kills', H.game.score, 'enemies', H.game.enemies.length);
+  // demolitionist active (mega bomb)
+  H.applyAscendancy(H.ASCENDANCIES.bombardier[0]);
+  if (bp.boomRadiusMult !== 1.4) throw new Error('demolitionist passive not applied');
+  for (let i = 0; i < 8; i++) H.spawnEnemyAt('orc', 200 + i * 20, 130);
+  bp.abilityCd = 0; H.castAbility(); pump(20);
+  console.log('demolitionist mega bomb fired, enemies', H.game.enemies.length);
+  // chain reactor active (detonate all)
+  H.applyAscendancy(H.ASCENDANCIES.bombardier[1]);
+  if (!bp.chainBonus) throw new Error('chainreactor passive not applied');
+  for (let i = 0; i < 15; i++) H.spawnEnemyAt('slime', 80 + (i % 5) * 60, 100 + Math.floor(i / 5) * 40);
+  bp.abilityCd = 0; H.castAbility(); pump(40);
+  console.log('chain reactor detonate fired, enemies', H.game.enemies.length);
+
+  console.log('PASS: no exceptions through Keeper fight, endless, blocks, and BOMBARDIER');
 } catch (err) {
   console.error('FAIL:', err.stack || err);
   process.exit(1);

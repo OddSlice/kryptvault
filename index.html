@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.8';
+  var GAME_VERSION = '0.8a';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -1208,12 +1208,12 @@
         saveRunData();
         game.toasts.push({ txt: skin.name + ' UNLOCKED!', t: 0 });
       } else {
-        game.toasts.push({ txt: 'NEED ' + skin.price + ' COINS (HAVE ' + Math.round(runData.coins) + ')', t: 0 });
+        game.toasts.push({ txt: 'NEED ' + skin.price + 'c — HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
       }
     } else if (runData.coins >= skin.price) {
       skinPending = id;
     } else {
-      game.toasts.push({ txt: 'NEED ' + skin.price + ' COINS (HAVE ' + Math.round(runData.coins) + ')', t: 0 });
+      game.toasts.push({ txt: 'NEED ' + skin.price + 'c — HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
     }
   }
 
@@ -1757,12 +1757,12 @@
         saveRunData();
         game.toasts.push({ txt: cls.name + ' UNLOCKED!', t: 0 });
       } else {
-        game.toasts.push({ txt: 'NEED ' + cls.price + ' COINS (HAVE ' + Math.round(runData.coins) + ')', t: 0 });
+        game.toasts.push({ txt: 'NEED ' + cls.price + 'c — HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
       }
     } else if (runData.coins >= cls.price) {
       classUnlockPending = cls.id;
     } else {
-      game.toasts.push({ txt: 'NEED ' + cls.price + ' COINS (HAVE ' + Math.round(runData.coins) + ')', t: 0 });
+      game.toasts.push({ txt: 'NEED ' + cls.price + 'c — HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
     }
   }
 
@@ -4919,7 +4919,7 @@
     }
 
     if (runData.totalRuns > 0) {
-      text('YOUR BEST: W' + pad(runData.bestWave, 2) + ' / ' + pad(runData.bestKills, 4) + ' KILLS',
+      text('YOUR BEST  W' + pad(runData.bestWave, 2) + ' · ' + runData.bestKills + ' KILLS',
            W / 2, 248, 6, '#00e5ff', 'center');
     }
     text('WASD MOVE — AUTO-FIRE — P PAUSE', W / 2, 259, 6, '#555555', 'center');
@@ -5143,9 +5143,9 @@
       text(stats[gi].l, gcx, 66, 6, '#888899', 'center');
       text(stats[gi].v, gcx, 78, 12, '#ffffff', 'center');
     }
-    // class + coins
+    // class + coins earned (unified coin display)
     text(currentClass.toUpperCase(), W / 2, 104, 6, '#bbbbbb', 'center');
-    text('+' + Math.round(game.coinsEarned) + ' COINS', W / 2, 116, 6, '#FFD700', 'center');
+    drawCoinText(W / 2, 116, '+' + Math.round(game.coinsEarned));
 
     // ----- damage attribution: a stacked bar (what actually carried the run) -----
     if (game.dmgDealt > 0) {
@@ -5437,16 +5437,19 @@
     }
   }
 
-  // Unified coin balance: gold coin icon + number, centred as a group at cx.
-  // Used everywhere a coin total is shown so the display is consistent.
-  function drawCoinBalance(cx, y) {
-    var s = String(Math.round(runData.coins));
+  // Unified coin display: gold coin icon + text, centred as a group at cx.
+  // Used everywhere a coin amount is shown so the presentation is identical.
+  function drawCoinText(cx, y, s) {
     var groupW = 8 + s.length * 6;
     var lx = Math.round(cx - groupW / 2);
     ctx.fillStyle = '#FFD700'; ctx.fillRect(lx, y - 1, 6, 6);
     ctx.fillStyle = '#aa8800'; ctx.fillRect(lx + 1, y, 4, 4);
     ctx.fillStyle = '#ffe98a'; ctx.fillRect(lx + 1, y, 2, 2);
     text(s, lx + 10, y, 6, '#FFD700');
+  }
+
+  function drawCoinBalance(cx, y) {
+    drawCoinText(cx, y, String(Math.round(runData.coins)));
   }
 
   function renderClassSelect() {
@@ -5573,8 +5576,9 @@
     drawAnimatedScanlines(0.05);
 
     text('THE VAULT', W / 2, 12, 10, '#FFD700', 'center');
-    text('TOMES  —  EQUIP ' + runData.equippedTomes.length + '/' + MAX_EQUIPPED_TOMES +
-         '   ' + Math.round(runData.coins) + 'c', W / 2, 34, 6, '#ffffff', 'center');
+    drawCoinBalance(W / 2, 28);
+    text('TOMES  —  EQUIP ' + runData.equippedTomes.length + '/' + MAX_EQUIPPED_TOMES,
+         W / 2, 44, 6, '#ffffff', 'center');
     for (var i = 0; i < SHOP_ITEMS.length; i++) {
       var item = SHOP_ITEMS[i];
       var lvl = runData.shop[item.id] || 0;

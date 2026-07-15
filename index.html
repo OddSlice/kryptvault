@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '0.8a';
+  var GAME_VERSION = '0.9';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -608,7 +608,6 @@
     var stateAtStart = game.gameState;
     if (game.gameState === 'nameentry') {
       if (e.code === 'Escape') {
-        pendingMode = 'normal';
         game.gameState = 'title';
         blurNameInput();
       } else if (document.activeElement !== nameInput) {
@@ -654,18 +653,6 @@
       else if (e.code === 'KeyT') { game.gameState = 'settings'; }
       else if (e.code === 'KeyR') { game.gameState = 'codex'; }
       else if (e.code === 'KeyS') { game.gameState = 'shop'; }
-      else if (e.code === 'KeyA') { game.gameState = 'achievements'; }
-      else if (e.code === 'KeyL') {
-        leaderboard.mode = leaderboard.mode === 'daily' ? 'normal' : 'daily';
-        leaderboard.state = 'idle';
-        maybeRefreshLeaderboard();
-      } else if (e.code === 'KeyD') {
-        startModeGate('daily');
-      }
-    } else if (game.gameState === 'modeselect') {
-      if (e.code === 'Digit1') startModeGate('normal');
-      else if (e.code === 'Digit2') startModeGate('daily');
-      else if (e.code === 'Escape') game.gameState = 'title';
     } else if (game.gameState === 'shop') {
       var si = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4 };
       if (e.code in si) tryBuyShopItem(si[e.code]);
@@ -674,8 +661,6 @@
       if (e.code === 'Escape') game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title';
       else if (e.code === 'ArrowLeft') { wardrobeClass = prevClassId(wardrobeClass); wardrobeScroll = 0; skinPending = null; }
       else if (e.code === 'ArrowRight') { wardrobeClass = nextClassId(wardrobeClass); wardrobeScroll = 0; skinPending = null; }
-    } else if (game.gameState === 'achievements') {
-      if (e.code === 'Escape' || e.code === 'KeyA') game.gameState = 'title';
     } else if (game.gameState === 'settings') {
       if (e.code === 'Escape' || e.code === 'KeyT') game.gameState = 'title';
       else if (e.code === 'KeyN') game.gameState = 'account';
@@ -793,17 +778,6 @@
           return;
         }
       }
-      // leaderboard tabs: left = all-time, right of it = daily
-      if (p.x >= LB_PANEL.x && p.x <= LB_PANEL.x + LB_PANEL.w &&
-          p.y >= LB_PANEL.y && p.y <= LB_PANEL.y + 16) {
-        var wantDaily = p.x >= LB_PANEL.x + 78 && p.x <= LB_PANEL.x + 138;
-        var wantAll = p.x < LB_PANEL.x + 78;
-        if ((wantDaily && leaderboard.mode !== 'daily') || (wantAll && leaderboard.mode === 'daily')) {
-          leaderboard.mode = wantDaily ? 'daily' : 'normal';
-          leaderboard.state = 'idle';
-          maybeRefreshLeaderboard();
-        }
-      }
     } else if (game.gameState === 'gameover' || game.gameState === 'nameentry' ||
                game.gameState === 'accountinfo' || game.gameState === 'login') {
       handleConfirm();
@@ -878,15 +852,7 @@
         }
         if (!sHit && p.y > 244) game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title';
       }
-    } else if (game.gameState === 'modeselect') {
-      for (var mc = 0; mc < MODE_CARDS.length; mc++) {
-        var mcard = MODE_CARDS[mc];
-        if (p.x >= mcard.x && p.x <= mcard.x + mcard.w && p.y >= mcard.y && p.y <= mcard.y + mcard.h) {
-          startModeGate(mcard.id);
-          return;
-        }
-      }
-    } else if (game.gameState === 'achievements' || game.gameState === 'codex') {
+    } else if (game.gameState === 'codex') {
       game.gameState = 'title';
     } else if (game.gameState === 'feedback') {
       for (var fb = 0; fb < FEEDBACK_BTNS.length; fb++) {
@@ -903,7 +869,6 @@
 
   var nameDraft = '';
   var afterName = 'play';     // where to go once the name/account step is done
-  var pendingMode = 'normal'; // 'daily' when started via the daily challenge key
 
   // Enter the initials screen from a user gesture, raising the mobile keyboard.
   function enterNameEntry(after) {
@@ -927,7 +892,7 @@
   }
 
   function handleConfirm() {
-    if (game.gameState === 'shop' || game.gameState === 'achievements' ||
+    if (game.gameState === 'shop' ||
         game.gameState === 'account' || game.gameState === 'codex' ||
         game.gameState === 'settings') {
       game.gameState = 'title';
@@ -940,9 +905,7 @@
       return;
     }
     if (game.gameState === 'title') {
-      game.gameState = 'modeselect';
-    } else if (game.gameState === 'modeselect') {
-      startModeGate('normal'); // Enter = quick-start a standard run
+      startRunGate();
     } else if (game.gameState === 'nameentry') {
       if (nameDraft.length === 3) {
         runData.name = nameDraft;
@@ -1153,7 +1116,6 @@
   // Equipped tome level (0 if not equipped, or in Daily where tomes are off for
   // a level playing field). Used everywhere a tome bonus is applied.
   function tomeLevel(id) {
-    if (game.mode === 'daily') return 0;
     return isTomeEquipped(id) ? (runData.shop[id] || 0) : 0;
   }
 
@@ -1237,30 +1199,6 @@
     }
     runData.equippedTomes.push(item.id);
     saveRunData();
-  }
-
-  // ---------------------------------------------------------------------------
-  // ACHIEVEMENTS
-  // ---------------------------------------------------------------------------
-  var ACHIEVEMENTS = [
-    { id: 'first_blood',  name: 'FIRST BLOOD',   desc: 'Slay your first foe' },
-    { id: 'wave_5',       name: 'GETTING DEEPER', desc: 'Reach wave 5' },
-    { id: 'wave_10',      name: 'VAULT DELVER',  desc: 'Reach wave 10' },
-    { id: 'boss_slayer',  name: 'BOSS SLAYER',   desc: 'Kill a boss' },
-    { id: 'curse_hoarder',name: 'CURSE HOARDER', desc: '4 cursed upgrades in one run' },
-    { id: 'untouchable',  name: 'UNTOUCHABLE',   desc: 'Clear a wave without damage' },
-    { id: 'moneybags',    name: 'MONEYBAGS',     desc: 'Hold 500 coins' },
-    { id: 'evolved',      name: 'EVOLVED',       desc: 'Take an evolution' }
-  ];
-
-  function unlockAch(id) {
-    if (runData.achievements[id]) return;
-    runData.achievements[id] = true;
-    saveRunData();
-    var def = null;
-    for (var i = 0; i < ACHIEVEMENTS.length; i++) if (ACHIEVEMENTS[i].id === id) def = ACHIEVEMENTS[i];
-    game.toasts.push({ txt: 'ACHIEVEMENT: ' + (def ? def.name : id), t: 0 });
-    playPickup();
   }
 
   // Evolutions: rare combo cards offered once both base upgrades are owned.
@@ -1513,7 +1451,7 @@
              equippedTomes: [], // up to 3 tome ids active per run
              classesOwned: {}, // coin-unlocked classes (e.g. ranger); base 3 are free
              skinsOwned: {}, equippedSkins: {}, // coin-bought hero skins (per class)
-             achievements: {} };
+             };
   }
 
   function saveRunData() {
@@ -1619,17 +1557,13 @@
 
   var leaderboard = { rows: [], state: 'idle', fetchedAt: 0, submitState: '', mode: 'normal' };
 
-  function todayISO() { return new Date().toISOString().slice(0, 10); }
-
   function fetchLeaderboard() {
     if (leaderboard.state === 'loading') return;
     leaderboard.state = 'loading';
     // fetch deep, then keep only each player's best run so one grinder
     // can't occupy half the board
     var q = SB_URL + '?select=name,disc,wave,kills,cls&order=wave.desc,kills.desc&limit=80';
-    q += leaderboard.mode === 'daily'
-       ? '&mode=eq.daily&day=eq.' + todayISO()
-       : '&mode=eq.normal';
+    q += '&mode=eq.normal';
     fetch(q, {
       headers: { apikey: SB_KEY }
     }).then(function (r) { return r.json(); }).then(function (rows) {
@@ -1794,13 +1728,7 @@
     // seed MUST be re-derived from the wave number on every call so layouts
     // are reproducible — never reuse leftover PRNG state from a prior wave.
     // Daily challenge: everyone gets the same layouts for the same date.
-    var daySalt = 0;
-    if (game.mode === 'daily') {
-      var d = todayISO();
-      daySalt = (parseInt(d.slice(0, 4), 10) * 372 + parseInt(d.slice(5, 7), 10) * 31 +
-                 parseInt(d.slice(8, 10), 10)) * 7919;
-    }
-    var seed = waveNumber * 9301 + 49297 + daySalt;
+    var seed = waveNumber * 9301 + 49297;
     var srand = function () { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
     var sizes = [[32, 32], [32, 64], [64, 32]];
     var count = 8 + Math.floor(srand() * 5); // 8..12 chunks
@@ -1930,8 +1858,7 @@
     spawnHaste: 1,        // haste pact speeds up spawning
     freezeTimer: 0,       // chrono pickup freezes enemies
     coinsEarned: 0,       // coins banked at the end of the run
-    tookDamage: false,    // for the UNTOUCHABLE achievement
-    mode: 'normal',       // 'normal' or 'daily'
+    mode: 'normal',       // kept for score-row compatibility
     waveBanner: 0,        // fading "WAVE NN" banner timer (continuous flow)
     curseHpMult: 1,       // cursed-upgrade modifiers, reset each run
     curseSpeedMult: 1,
@@ -2057,9 +1984,7 @@
     game.spawnHaste = 1;
     game.freezeTimer = 0;
     game.coinsEarned = 0;
-    game.tookDamage = false;
-    game.mode = pendingMode;
-    pendingMode = 'normal';
+    game.mode = 'normal';
     leaderboard.submitState = '';
     game.player = makePlayer();
     // every run starts with the chosen class's stats
@@ -2085,11 +2010,6 @@
   // Set up a wave. Wave 1 gets the frozen 2-second intro card; later waves
   // flow continuously — surviving enemies carry over and a banner fades in.
   function beginWave(n) {
-    // achievements that resolve on wave boundaries
-    if (n > 2 && !game.tookDamage) unlockAch('untouchable');
-    game.tookDamage = false;
-    if (n >= 5) unlockAch('wave_5');
-    if (n >= 10) unlockAch('wave_10');
     game.wave = n;
     game.bossWave = (n % 10 === 0); // bosses are biome finales (10/20/30...)
     // the Keeper has fallen: the crypt opens into the endless waves
@@ -2547,13 +2467,6 @@
     game.curseSpeedMult = Math.min(game.curseSpeedMult, 2.5);
     game.curseHpMult = Math.min(game.curseHpMult, 10);
     game.spawnHaste = Math.min(game.spawnHaste, 3);
-    if (u.evolution) unlockAch('evolved');
-    if (u.cursed) {
-      var curses = 0;
-      var cursedIds = ['lucky', 'darkpact', 'executioner', 'glasscannon'];
-      for (var ci = 0; ci < cursedIds.length; ci++) if (p.upgradesTaken[cursedIds[ci]]) curses++;
-      if (curses >= 4) unlockAch('curse_hoarder');
-    }
   }
 
   function tryPickCard(mx, my) {
@@ -3483,7 +3396,6 @@
     game.score++;
     game.waveKills++;
     game.coinsEarned += (1 + Math.floor(game.wave / 5)) * (1 + 0.25 * tomeLevel('frt')) * p.coinMult;
-    if (game.score === 1) unlockAch('first_blood');
     game.hitStop = Math.max(game.hitStop, 0.03); // tiny punch on every kill
     maybeDropPickup(en.x, en.y);
     // dark pact: kills detonate (queued — resolved next tick so we never
@@ -3590,7 +3502,6 @@
     bossExplosion(en.x, en.y);
     if (en.name) spawnFloatText(en.x, en.y - 22, en.name + ' SLAIN', en.color);
     playBossDeath();
-    unlockAch('boss_slayer');
     game.coinsEarned += 25 * (1 + 0.25 * tomeLevel('frt')) * game.player.coinMult;
     game.whiteFlash = 3;          // flash white for 3 frames
     game.shakeTimer = 0.5;
@@ -3627,7 +3538,6 @@
     amount = Math.max(1, Math.round(amount));
     p.hp -= amount;
     p.invuln = 0.5;
-    game.tookDamage = true;
     game.damageFlash = 0.1;
     if (shake) game.shakeTimer = 0.3;
     playHit();
@@ -3659,7 +3569,6 @@
     runData.totalRuns++;
     runData.totalKills += game.score;
     runData.coins += Math.round(game.coinsEarned);
-    if (runData.coins >= 500) unlockAch('moneybags');
     saveRunData();
     submitScore();
     setMusicTrack('lobby'); // back to the mellow menu loop
@@ -4588,7 +4497,6 @@
       }
       ctx.globalAlpha = 1;
     }
-    if (game.mode === 'daily') text('DAILY', W / 2, 22, 6, '#ff2dd0', 'center');
 
     // ----- top-right: unified score column, icon AFTER the number -----
     text(pad(game.score, 4), W - 22, 5, 8, '#ffffff', 'right');
@@ -4749,14 +4657,11 @@
   }
 
   function titleButtons() {
-    var unlocked = 0;
-    for (var i = 0; i < ACHIEVEMENTS.length; i++) if (runData.achievements[ACHIEVEMENTS[i].id]) unlocked++;
     return [
-      { id: 'play',     label: 'PLAY',                                          hint: 'ENTER', x: 24, y: 80,  w: 172, h: 42, big: true },
-      { id: 'shop',     label: 'THE VAULT  ' + Math.round(runData.coins) + 'c', hint: 'S', x: 24, y: 130, w: 172, h: 22 },
-      { id: 'awards',   label: 'AWARDS — ' + unlocked + '/' + ACHIEVEMENTS.length, hint: 'A', x: 24, y: 158, w: 172, h: 22 },
-      { id: 'codex',    label: 'RECIPE CODEX',                                  hint: 'R', x: 24, y: 186, w: 172, h: 22 },
-      { id: 'settings', label: 'SETTINGS',                                      hint: 'T', x: 24, y: 214, w: 172, h: 22 }
+      { id: 'play',     label: 'PLAY',                                          hint: 'ENTER', x: 24, y: 84,  w: 172, h: 42, big: true },
+      { id: 'shop',     label: 'THE VAULT  ' + Math.round(runData.coins) + 'c', hint: 'S', x: 24, y: 140, w: 172, h: 22 },
+      { id: 'codex',    label: 'RECIPE CODEX',                                  hint: 'R', x: 24, y: 170, w: 172, h: 22 },
+      { id: 'settings', label: 'SETTINGS',                                      hint: 'T', x: 24, y: 200, w: 172, h: 22 }
     ];
   }
 
@@ -4769,19 +4674,16 @@
     ];
   }
 
-  function startModeGate(mode) {
-    pendingMode = mode;
+  function startRunGate() {
     if (runData.name && runData.name.length === 3) enterClassSelect();
     else { enterNameEntry('play'); }
   }
 
   function titleButtonAction(id) {
     if (id === 'play') {
-      game.gameState = 'modeselect';
+      startRunGate();
     } else if (id === 'shop') {
       game.gameState = 'shop';
-    } else if (id === 'awards') {
-      game.gameState = 'achievements';
     } else if (id === 'codex') {
       game.gameState = 'codex';
     } else if (id === 'settings') {
@@ -4810,13 +4712,13 @@
     var s = game.gameState;
     if (s === 'wardrobe') { game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title'; return; }
     if (s === 'login') { game.gameState = 'account'; return; }
-    if (s === 'nameentry') { pendingMode = 'normal'; blurNameInput(); game.gameState = 'title'; return; }
+    if (s === 'nameentry') { blurNameInput(); game.gameState = 'title'; return; }
     if (s === 'feedback') { game.gameState = 'title'; maybeRefreshLeaderboard(); return; }
     game.gameState = 'title';
   }
   // menu states that show the shared back button (everything but title + gameplay)
   var BACK_STATES = { shop: 1, wardrobe: 1, settings: 1, account: 1, accountinfo: 1,
-    achievements: 1, codex: 1, login: 1, nameentry: 1, modeselect: 1, classselect: 1,
+    codex: 1, login: 1, nameentry: 1, classselect: 1,
     feedback: 1, gameover: 1 };
 
   function fmtKills(k) {
@@ -4876,16 +4778,11 @@
     ctx.fillRect(LB_PANEL.x - 1, LB_PANEL.y - 1, LB_PANEL.w + 2, LB_PANEL.h + 2);
     ctx.fillStyle = 'rgba(8,8,18,0.92)';
     ctx.fillRect(LB_PANEL.x, LB_PANEL.y, LB_PANEL.w, LB_PANEL.h);
-    // tabs: all-time / daily
+    // header
     ctx.fillStyle = '#16162a';
     ctx.fillRect(LB_PANEL.x, LB_PANEL.y, LB_PANEL.w, 16);
-    var isDaily = leaderboard.mode === 'daily';
-    ctx.fillStyle = !isDaily ? '#2a2a3e' : 'transparent';
-    if (!isDaily) ctx.fillRect(LB_PANEL.x, LB_PANEL.y, 78, 16);
-    else { ctx.fillStyle = '#2a2a3e'; ctx.fillRect(LB_PANEL.x + 78, LB_PANEL.y, 60, 16); }
-    text('ALL-TIME', LB_PANEL.x + 8, LB_PANEL.y + 5, 6, !isDaily ? '#FFD700' : '#666688');
-    text('DAILY', LB_PANEL.x + 86, LB_PANEL.y + 5, 6, isDaily ? '#FFD700' : '#666688');
-    text('TOP 10 (L)', LB_PANEL.x + LB_PANEL.w - 6, LB_PANEL.y + 5, 6, '#555577', 'right');
+    text('LEADERBOARD', LB_PANEL.x + 8, LB_PANEL.y + 5, 6, '#FFD700');
+    text('TOP 10', LB_PANEL.x + LB_PANEL.w - 6, LB_PANEL.y + 5, 6, '#555577', 'right');
     // column headers
     text('#', LB_PANEL.x + 8, LB_PANEL.y + 21, 6, '#555577');
     text('NAME', LB_PANEL.x + 38, LB_PANEL.y + 21, 6, '#555577');
@@ -5126,8 +5023,6 @@
     text('YOU DIED', W / 2, 22, 16, '#ff2d2d', 'center');
     if (game.newRecord) {
       text('★ NEW RECORD ★', W / 2, 46, 8, '#FFD700', 'center');
-    } else if (game.mode === 'daily') {
-      text('DAILY CHALLENGE', W / 2, 46, 6, '#ff2dd0', 'center');
     }
 
     // ----- stat grid: 4 columns, label above value (scannable) -----
@@ -5625,7 +5520,7 @@
       else text('UP ' + price + 'c', ur.x + ur.w / 2, ur.y + 7, 6, affordable ? '#FFD700' : '#883333', 'center');
     }
     text('TAP TOME = EQUIP (MAX 3)   TAP PRICE = UPGRADE', W / 2, 236, 6, '#888888', 'center');
-    text('TOMES ARE OFF IN DAILY  —  ESC / ENTER TO RETURN', W / 2, 248, 6, '#666666', 'center');
+    text('ESC / ENTER TO RETURN', W / 2, 248, 6, '#666666', 'center');
   }
 
   // ---------------------------------------------------------------------------
@@ -5735,53 +5630,6 @@
     text('TAP CARD = EQUIP / BUY    ESC = BACK', W / 2, 252, 6, '#888888', 'center');
   }
 
-  // play flow: pick a run mode before class select
-  var MODE_CARDS = [
-    { id: 'normal', x: 48,  y: 62, w: 180, h: 142 },
-    { id: 'daily',  x: 252, y: 62, w: 180, h: 142 }
-  ];
-
-  function renderModeSelect() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
-
-    text('CHOOSE YOUR RUN', W / 2, 26, 10, '#FFD700', 'center');
-
-    for (var i = 0; i < MODE_CARDS.length; i++) {
-      var c = MODE_CARDS[i];
-      var hover = mouse.x >= c.x && mouse.x <= c.x + c.w && mouse.y >= c.y && mouse.y <= c.y + c.h;
-      var accent = c.id === 'daily' ? '#ff2dd0' : '#FFD700';
-      if (hover) {
-        ctx.fillStyle = c.id === 'daily' ? 'rgba(255,45,208,0.35)' : 'rgba(255,215,0,0.35)';
-        ctx.fillRect(c.x - 4, c.y - 4, c.w + 8, c.h + 8);
-      }
-      ctx.fillStyle = accent;
-      ctx.fillRect(c.x - 2, c.y - 2, c.w + 4, c.h + 4);
-      ctx.fillStyle = '#101020';
-      ctx.fillRect(c.x, c.y, c.w, c.h);
-      text(String(i + 1), c.x + 8, c.y + 8, 6, '#666666');
-      if (c.id === 'normal') {
-        text('STANDARD', c.x + c.w / 2, c.y + 12, 8, accent, 'center');
-        text('THE ENDLESS CRYPT', c.x + c.w / 2, c.y + 36, 6, '#ffffff', 'center');
-        text('NEW RANDOM DUNGEON', c.x + c.w / 2, c.y + 58, 6, '#bbbbbb', 'center');
-        text('EVERY SINGLE RUN', c.x + c.w / 2, c.y + 70, 6, '#bbbbbb', 'center');
-        text('COMPETE ON THE', c.x + c.w / 2, c.y + 92, 6, '#888888', 'center');
-        text('ALL-TIME LEADERBOARD', c.x + c.w / 2, c.y + 104, 6, '#888888', 'center');
-      } else {
-        text('DAILY CHALLENGE', c.x + c.w / 2, c.y + 12, 8, accent, 'center');
-        text('ONE SHARED DUNGEON', c.x + c.w / 2, c.y + 36, 6, '#ffffff', 'center');
-        text('SAME LAYOUT FOR', c.x + c.w / 2, c.y + 58, 6, '#bbbbbb', 'center');
-        text('EVERYONE TODAY (UTC)', c.x + c.w / 2, c.y + 70, 6, '#bbbbbb', 'center');
-        text('ITS OWN DAILY', c.x + c.w / 2, c.y + 92, 6, '#888888', 'center');
-        text('LEADERBOARD', c.x + c.w / 2, c.y + 104, 6, '#888888', 'center');
-      }
-      text('CLICK TO PLAY', c.x + c.w / 2, c.y + 124, 6, hover ? '#ffffff' : '#555566', 'center');
-    }
-
-    text('ENTER = QUICK-START STANDARD', W / 2, 256, 6, '#555566', 'center');
-  }
-
   function renderCodex() {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
@@ -5861,35 +5709,7 @@
     text('ENTER OPENS ITCH — ESC SKIPS', W / 2, 226, 6, '#555566', 'center');
   }
 
-  function renderAchievements() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
-
-    text('ACHIEVEMENTS', W / 2, 14, 10, '#FFD700', 'center');
-    var unlockedCount = 0;
-    for (var c = 0; c < ACHIEVEMENTS.length; c++) if (runData.achievements[ACHIEVEMENTS[c].id]) unlockedCount++;
-    text(unlockedCount + ' / ' + ACHIEVEMENTS.length, W / 2, 32, 6, '#888888', 'center');
-
-    for (var i = 0; i < ACHIEVEMENTS.length; i++) {
-      var a = ACHIEVEMENTS[i];
-      var got = !!runData.achievements[a.id];
-      var col = i % 2, row = Math.floor(i / 2);
-      var x = 30 + col * 215, y = 52 + row * 42;
-      ctx.fillStyle = got ? '#1f1a08' : '#101016';
-      ctx.fillRect(x, y, 200, 36);
-      ctx.fillStyle = got ? '#FFD700' : '#2a2a3a';
-      ctx.fillRect(x, y, 200, 1);
-      ctx.fillRect(x, y + 35, 200, 1);
-      text(got ? '*' : '-', x + 8, y + 8, 8, got ? '#FFD700' : '#444455');
-      text(a.name, x + 24, y + 6, 6, got ? '#FFD700' : '#666677');
-      text(a.desc, x + 24, y + 18, 6, got ? '#bbbbbb' : '#444455');
-    }
-
-    text('ESC / ENTER TO RETURN', W / 2, 244, 6, '#888888', 'center');
-  }
-
-  // Achievement toast popups, drawn over every screen.
+  // Toast popups, drawn over every screen.
   function drawToasts() {
     for (var i = 0; i < game.toasts.length; i++) {
       var t = game.toasts[i];
@@ -6003,14 +5823,8 @@
     } else if (game.gameState === 'codex') {
       renderCodex();
       drawScanlines();
-    } else if (game.gameState === 'modeselect') {
-      renderModeSelect();
-      drawScanlines();
     } else if (game.gameState === 'feedback') {
       renderFeedback();
-      drawScanlines();
-    } else if (game.gameState === 'achievements') {
-      renderAchievements();
       drawScanlines();
     } else if (game.gameState === 'gameover') {
       renderGameOver();

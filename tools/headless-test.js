@@ -61,6 +61,7 @@ const doc = {
 };
 const sandbox = {
   window: win, document: doc,
+  setInterval, clearInterval, setTimeout, clearTimeout,
   localStorage: { _m: {}, getItem(k) { return this._m[k] ?? null; }, setItem(k, v) { this._m[k] = String(v); }, removeItem(k) { delete this._m[k]; } },
   fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve([]), text: () => Promise.resolve('') }),
   performance, console, Math, JSON, Date, Image: function () { return { addEventListener: () => {}, style: {} }; },
@@ -178,6 +179,7 @@ try {
   console.log('chain reactor detonate fired, enemies', H.game.enemies.length);
 
   console.log('PASS: no exceptions through Keeper fight, endless, blocks, and BOMBARDIER');
+  process.exit(0); // the game's sync interval would otherwise hold the loop open
 } catch (err) {
   console.error('FAIL:', err.stack || err);
   process.exit(1);

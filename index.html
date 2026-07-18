@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '1.0';
+  var GAME_VERSION = '1.0a';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -1456,6 +1456,7 @@
 
   function saveRunData() {
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(runData)); } catch (e) { /* storage unavailable */ }
+    progressDirty = true; // ship it upstream on the next sync tick
   }
 
   function loadRunData() {
@@ -1501,6 +1502,75 @@
   }
 
   // ---------------------------------------------------------------------------
+  // CROSS-DEVICE PROGRESS SYNC — the account carries your save, not just your
+  // name. Progress uploads on every meaningful change (debounced) and comes
+  // back down on login and on boot, merged so nothing earned is ever lost.
+  // ---------------------------------------------------------------------------
+  function collectProgress() {
+    return {
+      bestWave: runData.bestWave, bestKills: runData.bestKills, bestLevel: runData.bestLevel,
+      totalRuns: runData.totalRuns, totalKills: runData.totalKills,
+      coins: Math.round(runData.coins),
+      shop: runData.shop, equippedTomes: runData.equippedTomes,
+      classesOwned: runData.classesOwned,
+      skinsOwned: runData.skinsOwned, equippedSkins: runData.equippedSkins,
+      unlockedClasses: runData.unlockedClasses,
+      seenFeedbackPrompt: runData.seenFeedbackPrompt
+    };
+  }
+
+  // merge server progress into the local save: numbers take the max, owned
+  // sets take the union — playing on two devices can only ever add up
+  function applyProgress(sp) {
+    if (!sp) return;
+    ['bestWave', 'bestKills', 'bestLevel', 'totalRuns', 'totalKills', 'coins'].forEach(function (k) {
+      if (typeof sp[k] === 'number') runData[k] = Math.max(runData[k] || 0, sp[k]);
+    });
+    if (sp.shop) for (var t in runData.shop) runData.shop[t] = Math.max(runData.shop[t] || 0, sp.shop[t] || 0);
+    if (sp.classesOwned) for (var c in sp.classesOwned) if (sp.classesOwned[c]) runData.classesOwned[c] = true;
+    if (sp.skinsOwned) for (var sk in sp.skinsOwned) if (sp.skinsOwned[sk]) runData.skinsOwned[sk] = true;
+    if (sp.equippedSkins) for (var es in sp.equippedSkins) {
+      if (!runData.equippedSkins[es]) runData.equippedSkins[es] = sp.equippedSkins[es];
+    }
+    if (sp.equippedTomes && sp.equippedTomes.length && runData.equippedTomes.length === 0) {
+      runData.equippedTomes = sp.equippedTomes.slice(0, 3);
+    }
+    if (sp.unlockedClasses) runData.unlockedClasses = true;
+    if (sp.seenFeedbackPrompt) runData.seenFeedbackPrompt = true;
+    saveRunData();
+  }
+
+  function syncProgressUp() {
+    if (!runData.playerId || !runData.playerSecret) return;
+    progressDirty = false;
+    sbRpc('save_progress', {
+      p_id: runData.playerId,
+      p_secret: runData.playerSecret,
+      p_progress: collectProgress()
+    }, function () {});
+  }
+
+  // pull on boot so a device you logged into earlier catches up with
+  // progress made elsewhere since (login_player doubles as the fetch)
+  function syncProgressDown() {
+    if (!runData.playerId || !runData.playerSecret || !runData.name) return;
+    sbRpc('login_player', {
+      p_name: runData.name, p_disc: runData.playerDisc, p_secret: runData.playerSecret
+    }, function (res) {
+      if (res && res.id) {
+        applyProgress(res.progress);
+        syncProgressUp(); // push the merged state back
+      }
+    });
+  }
+
+  // debounce: saveRunData marks dirty; a slow timer ships changes upstream
+  var progressDirty = false;
+  setInterval(function () {
+    if (progressDirty) syncProgressUp();
+  }, 8000);
+
+  // ---------------------------------------------------------------------------
   // PLAYER ACCOUNTS — tag (MAR#1234) + secret vault key, portable across PCs
   // ---------------------------------------------------------------------------
   var account = { state: 'idle' };       // idle | creating | created | error
@@ -1519,6 +1589,7 @@
         runData.playerSecret = res.secret;
         runData.playerId = res.id;
         saveRunData();
+        syncProgressUp(); // seed the fresh account with any local progress
         account.state = 'created';
         if (silentToast) {
           game.toasts.push({ txt: 'ACCOUNT CREATED: ' + playerTag(), t: 0 });
@@ -1541,7 +1612,9 @@
         runData.playerDisc = dc;
         runData.playerSecret = ky;
         runData.playerId = res.id;
-        saveRunData();
+        // restore everything earned on other devices, then push the merge back
+        applyProgress(res.progress);
+        syncProgressUp();
         loginForm.state = 'idle';
         loginForm.buf = '';
         loginInput.value = '';
@@ -3570,6 +3643,7 @@
     runData.totalKills += game.score;
     runData.coins += Math.round(game.coinsEarned);
     saveRunData();
+    syncProgressUp(); // push immediately — a closed tab must not lose the run
     submitScore();
     setMusicTrack('lobby'); // back to the mellow menu loop
   }
@@ -5871,6 +5945,7 @@
   // ---------------------------------------------------------------------------
   fetchLeaderboard();
   initMenuBackdrop();
+  syncProgressDown(); // catch up with progress made on other devices
   // migrate pre-account players: claim a tag for the locally saved name
   if (runData.name && runData.name.length === 3 && !runData.playerDisc) {
     registerAccount(true);

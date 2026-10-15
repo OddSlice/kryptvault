@@ -697,6 +697,10 @@
   // back; plus a few per-screen shortcuts.
   function menuKey(c, e) {
     var s = game.gameState;
+    if (s === 'classselect' && CLS_STYLE === 'ring' && (c === 'ArrowLeft' || c === 'KeyA' || c === 'ArrowRight' || c === 'KeyD')) {
+      rotateClassRing(c === 'ArrowLeft' || c === 'KeyA' ? -1 : 1);
+      return;
+    }
     if (c === 'ArrowUp' || c === 'KeyW') uiNav(0, -1);
     else if (c === 'ArrowDown' || c === 'KeyS') uiNav(0, 1);
     else if (c === 'ArrowLeft' || c === 'KeyA') uiNav(-1, 0);
@@ -806,6 +810,9 @@
       var t = e.changedTouches[i];
       if (t.identifier !== touchCtl.id) continue;
       var wasTap = !touchCtl.moved;
+      if (!wasTap && game.gameState === 'classselect' && CLS_STYLE === 'ring' && Math.abs(touchCtl.vx) > 0.5) {
+        rotateClassRing(touchCtl.vx < 0 ? 1 : -1);
+      }
       touchCtl.active = false;
       touchCtl.vx = 0; touchCtl.vy = 0;
       if (wasTap) {
@@ -840,6 +847,11 @@
       if (ci >= 0) pickDraftCard(ci);
     } else if (s === 'playing') {
       if (overAbilityBtn(p)) { castAbility(); return; }
+      if (HUD_STYLE !== 'current') {
+        var hp2 = HUD_PAUSE;
+        if (hp2.w && p.x >= hp2.x && p.x <= hp2.x + hp2.w && p.y >= hp2.y && p.y <= hp2.y + hp2.h) game.gameState = 'paused';
+        return;
+      }
       // pause button hit-box (top-right, under the score column)
       if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 32 && p.y <= 52) {
         game.gameState = 'paused';
@@ -1710,6 +1722,8 @@
 
   function enterClassSelect() {
     classUnlockPending = null;
+    classSelFocus = classIndex(currentClass);
+    clsRingRot = classSelFocus;
     var cardW = 84, cardH = 126, gap = 6; // narrow enough to fit 5 across 480
     var totalW = CLASSES.length * cardW + (CLASSES.length - 1) * gap;
     var startX = Math.round((W - totalW) / 2);
@@ -4525,6 +4539,9 @@
   // column, bottom-left build cluster (ability + upgrade lines + level)
   // over a thin XP bar.
   function renderHUD() {
+    if (HUD_STYLE === 'classic') { renderHUDClassic(); return; }
+    if (HUD_STYLE === 'bar') { renderHUDBar(); return; }
+    if (HUD_STYLE === 'minimal') { renderHUDMinimal(); return; }
     var p = game.player;
 
     // ----- top-left: HP segments with the exact number underneath -----
@@ -4677,6 +4694,364 @@
       ctx.fillRect(bx2, by2, Math.round(bw2 * clamp(game.boss.hp / game.boss.maxHp, 0, 1)), bh2);
     }
   }
+  // ---------------------------------------------------------------------------
+  // HUD PROTOTYPES — three candidate layouts, picked with ?hud=classic|bar|minimal
+  // (no parameter = the current HUD). Once one is chosen the others go.
+  // ---------------------------------------------------------------------------
+  function urlParam(name, fallback) {
+    try {
+      var m = new RegExp('[?&]' + name + '=([a-z]+)').exec(window.location.search || '');
+      return m ? m[1] : fallback;
+    } catch (e) { return fallback; }
+  }
+  var HUD_STYLE = urlParam('hud', 'current');
+  // touch players still need an on-screen pause; desktop has P / Esc
+  var HUD_PAUSE = { x: 0, y: 0, w: 0, h: 0 };
+
+  function hudUpgradeKeys(p) {
+    return Object.keys(p.upgradesTaken).filter(function (uid) { return uid.indexOf('asc_') !== 0; });
+  }
+  function upgradeColor(id) {
+    for (var u = 0; u < UPGRADES.length; u++) if (UPGRADES[u].id === id) return UPGRADES[u].color;
+    for (var e = 0; e < EVOLUTIONS.length; e++) if (EVOLUTIONS[e].id === id) return EVOLUTIONS[e].color;
+    return '#888888';
+  }
+  function isEvolutionId(id) {
+    for (var e = 0; e < EVOLUTIONS.length; e++) if (EVOLUTIONS[e].id === id) return true;
+    return false;
+  }
+
+  // one belt slot: framed icon with its stack count in the corner
+  function drawUpgradeSlot(id, count, x, y, size) {
+    x = Math.round(x); y = Math.round(y);
+    var evo = isEvolutionId(id);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x, y, size, size);
+    ctx.fillStyle = evo ? '#7a2a68' : '#3b3550';
+    ctx.fillRect(x, y, size, 1); ctx.fillRect(x, y + size - 1, size, 1);
+    ctx.fillRect(x, y, 1, size); ctx.fillRect(x + size - 1, y, 1, size);
+    ctx.fillStyle = '#14121c';
+    ctx.fillRect(x + 1, y + 1, size - 2, size - 2);
+    var art = CARD_ART[id];
+    var o = Math.floor((size - 12) / 2);
+    if (art) drawPixelIcon(art, x + o, y + o, 1);
+    else { ctx.fillStyle = upgradeColor(id); ctx.fillRect(x + 3, y + 3, size - 6, size - 6); }
+    if (count > 1) text(String(count), x + size, y + size - 6, 6, '#ffffff', 'right');
+  }
+
+  // A row (or rows) of upgrade slots between x0 and x1, bottom-aligned at yb.
+  // Grows upward when the run outgrows one row.
+  function drawUpgradeBelt(p, x0, x1, yb, size, gap) {
+    var keys = hudUpgradeKeys(p);
+    var pitch = size + gap;
+    var perRow = Math.max(1, Math.floor((x1 - x0 + gap) / pitch));
+    for (var k = 0; k < keys.length; k++) {
+      var col = k % perRow, row = Math.floor(k / perRow);
+      drawUpgradeSlot(keys[k], p.upgradesTaken[keys[k]], x0 + col * pitch, yb - size - row * pitch, size);
+    }
+    return keys.length;
+  }
+
+  // Liquid-filled glass orb (Diablo-style). ratio 0..1 is the fill level.
+  function drawOrb(cx, cy, r, ratio, col, colDark, frame) {
+    ratio = clamp(ratio, 0, 1);
+    frame = frame || '#b08a2e';
+    // socket + metal frame
+    ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.arc(cx + 1, cy + 1, r + 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#3a2c12';
+    ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = frame;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1a1208';
+    ctx.beginPath(); ctx.arc(cx, cy, r + 0.5, 0, Math.PI * 2); ctx.fill();
+
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = '#0c0608';
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    var top = cy + r - 2 * r * ratio;
+    var g = ctx.createLinearGradient(0, cy - r, 0, cy + r);
+    if (g && g.addColorStop) { g.addColorStop(0, col); g.addColorStop(1, colDark); ctx.fillStyle = g; }
+    else ctx.fillStyle = col;
+    ctx.fillRect(cx - r, top, r * 2, cy + r - top + 1);
+    // sloshing surface line
+    if (ratio > 0.02 && ratio < 0.98) {
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      for (var sx = -r; sx < r; sx += 1) {
+        var wy = top + Math.sin(sx * 0.35 + game.time * 3.5) * 0.9;
+        ctx.fillRect(cx + sx, wy - 0.5, 1, 1);
+      }
+    }
+    // glass: dark rim + soft highlight
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx, cy, r - 1, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath(); ctx.ellipse(cx - r * 0.35, cy - r * 0.45, r * 0.38, r * 0.22, -0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(Math.round(cx - r * 0.55), Math.round(cy - r * 0.5), 2, 2);
+    ctx.restore();
+  }
+
+  // HP orb with the numbers inside (current big, max small) + low-HP pulse
+  function drawHpOrb(p, cx, cy, r) {
+    var ratio = clamp(p.hp / p.maxHp, 0, 1);
+    if (ratio < 0.3) {
+      ctx.globalAlpha = 0.25 + 0.25 * Math.sin(game.time * 8);
+      ctx.fillStyle = '#ff2020';
+      ctx.beginPath(); ctx.arc(cx, cy, r + 7, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    drawOrb(cx, cy, r, ratio, '#ff3b3b', '#6a0010');
+    var big = r >= 18 ? 8 : 6;
+    text(String(Math.max(0, Math.ceil(p.hp))), cx, cy - (r >= 18 ? 7 : 5), big, '#ffffff', 'center');
+    text('/' + Math.round(p.maxHp), cx, cy + (r >= 18 ? 3 : 2), 6, '#ffd0d0', 'center');
+  }
+
+  // the ascendancy ability: a socket that charges up; locked until wave 10
+  function drawAbilitySocket(p, x, y, s, keyLabel) {
+    ABILITY_BTN.x = x; ABILITY_BTN.y = y; ABILITY_BTN.w = s; ABILITY_BTN.h = s;
+    drawPanel(x, y, s, s, { fill: '#0b0910', border: '#3b3550', flat: true });
+    if (!p.ascendancy) {
+      drawIcon('lock', x + s / 2 - 4, y + s / 2 - 7, '#4a4560');
+      text('W10', x + s / 2, y + s - 8, 6, '#6f6d8d', 'center');
+      return;
+    }
+    var ready = p.abilityCd <= 0;
+    var art = CARD_ART[p.ascendancy.id];
+    var sc = s >= 26 ? 2 : 1;
+    if (art) {
+      if (!ready) ctx.globalAlpha = 0.35;
+      drawPixelIcon(art, x + Math.round((s - 12 * sc) / 2), y + Math.round((s - 12 * sc) / 2), sc);
+      ctx.globalAlpha = 1;
+    }
+    if (!ready) {
+      var cdRatio = clamp(p.abilityCd / (p.abilityMaxCd || 1), 0, 1);
+      ctx.fillStyle = 'rgba(0,0,20,0.65)';
+      ctx.fillRect(x + 1, y + 1, s - 2, Math.round((s - 2) * cdRatio));
+      text(String(Math.ceil(p.abilityCd)), x + s / 2, y + s / 2 - 4, 8, '#ffffff', 'center');
+    } else {
+      var pulse = 0.5 + 0.5 * Math.sin(game.time * 6);
+      ctx.fillStyle = p.ascendancy.color;
+      ctx.globalAlpha = 0.5 + 0.5 * pulse;
+      ctx.fillRect(x, y, s, 1); ctx.fillRect(x, y + s - 1, s, 1);
+      ctx.fillRect(x, y, 1, s); ctx.fillRect(x + s - 1, y, 1, s);
+      ctx.globalAlpha = 1;
+    }
+    if (keyLabel && showKeyHints()) drawKeycap(keyLabel, x + s / 2, y - 11, 'center');
+  }
+
+  function drawKillsCoins(xr, y) {
+    text(pad(game.score, 4), xr - 14, y, 8, '#ffffff', 'right');
+    drawSkullIcon(xr - 10, y - 1);
+    text(pad(Math.round(game.coinsEarned), 4), xr - 14, y + 13, 8, '#FFD700', 'right');
+    drawCoinIcon(xr - 9, y + 13);
+  }
+
+  function drawBossBar(y) {
+    if (!(game.bossWave && game.boss)) return;
+    var bw2 = 220, bh2 = 8, bx2 = Math.round((W - bw2) / 2);
+    text(game.boss.name || 'BOSS', W / 2, y, 8, game.boss.color, 'center');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(bx2 - 2, y + 11, bw2 + 4, bh2 + 4);
+    ctx.fillStyle = '#7a5a1a';
+    ctx.fillRect(bx2 - 1, y + 12, bw2 + 2, bh2 + 2);
+    ctx.fillStyle = '#2a0006';
+    ctx.fillRect(bx2, y + 13, bw2, bh2);
+    ctx.fillStyle = '#d4202a';
+    ctx.fillRect(bx2, y + 13, Math.round(bw2 * clamp(game.boss.hp / game.boss.maxHp, 0, 1)), bh2);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(bx2, y + 13, bw2, 2);
+  }
+
+  function drawWaveBanners() {
+    if (game.endlessBanner > 0) {
+      ctx.globalAlpha = Math.min(1, game.endlessBanner / 1.2);
+      text('THE VAULT IS BROKEN', W / 2, 88, 10, '#c9a227', 'center');
+      text('ENDLESS WAVES', W / 2, 108, 16, '#ff2d2d', 'center');
+      text('HOW DEEP CAN YOU GO?', W / 2, 132, 6, '#bbbbbb', 'center');
+      ctx.globalAlpha = 1;
+    }
+    if (game.waveBanner > 0) {
+      ctx.globalAlpha = Math.min(1, game.waveBanner / 0.6);
+      text('WAVE ' + pad(game.wave, 2), W / 2, 60, 16, '#FFD700', 'center');
+      if (game.bossWave && game.boss) text(game.boss.name, W / 2, 82, 10, game.boss.color, 'center');
+      else if (game.bossWave) text('! BOSS !', W / 2, 82, 8, '#ff2d2d', 'center');
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawTouchPause(x, y) {
+    if (showKeyHints()) { HUD_PAUSE.w = 0; return; }
+    HUD_PAUSE.x = x; HUD_PAUSE.y = y; HUD_PAUSE.w = 18; HUD_PAUSE.h = 18;
+    drawPanel(x, y, 18, 18, { fill: 'rgba(0,0,0,0.55)', border: '#55557a', flat: true });
+    ctx.fillStyle = '#d8d8e8';
+    ctx.fillRect(x + 6, y + 5, 2, 8); ctx.fillRect(x + 10, y + 5, 2, 8);
+  }
+
+  // ===== A: CLASSIC — Diablo II / Halls of Torment =====
+  // Full-width iron panel along the bottom with two orbs at the ends:
+  // life on the left, experience on the right. Ability socket + upgrade belt
+  // in between; the wave cartouche sits on the panel's top edge.
+  function renderHUDClassic() {
+    var p = game.player;
+    var PH = 24, py = H - PH;
+    // panel body
+    ctx.fillStyle = 'rgba(10,9,14,0.94)';
+    ctx.fillRect(0, py, W, PH);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, py - 2, W, 1);
+    ctx.fillStyle = '#8a6d2a';
+    ctx.fillRect(0, py - 1, W, 1);
+    ctx.fillStyle = '#3a2f18';
+    ctx.fillRect(0, py, W, 1);
+    // rivets
+    ctx.fillStyle = '#6b5424';
+    for (var rv = 70; rv < W - 60; rv += 40) ctx.fillRect(rv, py + PH - 4, 2, 2);
+
+    // wave cartouche on the panel's top edge
+    var cw = 70, cx0 = Math.round(W / 2 - cw / 2);
+    drawPanel(cx0, py - 9, cw, 13, { fill: '#15110a', border: '#8a6d2a', flat: true });
+    text('WAVE ' + pad(game.wave, 2), W / 2, py - 6, 8, '#FFD700', 'center');
+
+    // orbs: life left, experience right (sockets bite into the panel)
+    var r = 21, oy = H - 22;
+    ctx.fillStyle = 'rgba(10,9,14,0.94)';
+    ctx.beginPath(); ctx.arc(30, oy, r + 6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(W - 30, oy, r + 6, 0, Math.PI * 2); ctx.fill();
+    drawHpOrb(p, 30, oy, r);
+    var xpRatio = clamp(game.xp / xpForNext(), 0, 1);
+    drawOrb(W - 30, oy, r, xpRatio, '#3fd2ff', '#063a66');
+    text('LV', W - 30, oy - 9, 6, '#cdf4ff', 'center');
+    text(pad(game.level, 2), W - 30, oy - 1, 10, '#ffffff', 'center');
+
+    // ability socket + belt
+    drawAbilitySocket(p, 58, py + 2, 20, 'SPACE');
+    // the belt runs under the cartouche (which only overhangs the top edge)
+    drawUpgradeBelt(p, 84, W - 62, H - 3, 16, 2);
+
+    // top: score corner, boss plate at top-centre (aRPG target bar)
+    drawKillsCoins(W - 6, 6);
+    drawBossBar(6);
+    drawWaveBanners();
+    drawTouchPause(6, 6);
+  }
+
+  // ===== B: ACTION BAR — Diablo IV / Path of Exile 2 =====
+  // A compact centred bar: life orb on the left, ability orb on the right,
+  // upgrade slots inside, the XP strip welded to the bar's top edge with the
+  // level badge. Corners stay clear for the fight.
+  function renderHUDBar() {
+    var p = game.player;
+    var keys = hudUpgradeKeys(p);
+    var slot = 14, gap = 2, pitch = slot + gap;
+    var barW = 224, barX = Math.round((W - barW) / 2);
+    var perRow = Math.floor((barW - 8 + gap) / pitch);
+    var rows = Math.max(1, Math.ceil(keys.length / perRow));
+    var barH = 6 + rows * pitch;
+    var barY = H - barH - 4;
+
+    drawPanel(barX, barY, barW, barH, { fill: 'rgba(12,11,18,0.9)', border: '#4a3c1c' });
+    ctx.fillStyle = '#8a6d2a';
+    ctx.fillRect(barX + 1, barY, barW - 2, 1);
+    // slots, centred in the bar
+    var used = Math.min(keys.length, perRow);
+    var sx0 = Math.round(barX + barW / 2 - (Math.max(used, 1) * pitch - gap) / 2);
+    for (var k = 0; k < keys.length; k++) {
+      var col = k % perRow, row = Math.floor(k / perRow);
+      drawUpgradeSlot(keys[k], p.upgradesTaken[keys[k]], sx0 + col * pitch, barY + 4 + row * pitch, slot);
+    }
+    if (keys.length === 0) text('UPGRADES APPEAR HERE', W / 2, barY + barH / 2 - 3, 6, '#55536e', 'center');
+
+    // XP strip welded on top + level badge
+    var xpY = barY - 5;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(barX, xpY - 1, barW, 5);
+    ctx.fillStyle = '#0a2a33';
+    ctx.fillRect(barX + 1, xpY, barW - 2, 3);
+    ctx.fillStyle = '#3fd2ff';
+    ctx.fillRect(barX + 1, xpY, Math.round((barW - 2) * clamp(game.xp / xpForNext(), 0, 1)), 3);
+    var lv = 'LV ' + game.level;
+    var lw = measureText(lv, 6) + 8;
+    drawPanel(barX + barW / 2 - lw / 2, xpY - 6, lw, 11, { fill: '#082430', border: '#3fd2ff', flat: true });
+    text(lv, W / 2, xpY - 3, 6, '#cdf4ff', 'center');
+
+    // life orb (left) and ability orb (right) hugging the bar ends
+    var r = 20, oy = H - 24;
+    drawHpOrb(p, barX - 14, oy, r);
+    var ax = barX + barW + 14;
+    if (p.ascendancy) {
+      var ready = p.abilityCd <= 0;
+      var charge = ready ? 1 : 1 - clamp(p.abilityCd / (p.abilityMaxCd || 1), 0, 1);
+      drawOrb(ax, oy, 16, charge, ready ? '#c06bff' : '#7a46b0', '#2a0c4a');
+      var art = CARD_ART[p.ascendancy.id];
+      if (art) drawPixelIcon(art, ax - 6, oy - 6, 1);
+      if (!ready) text(String(Math.ceil(p.abilityCd)), ax, oy + 7, 6, '#ffffff', 'center');
+      else if (showKeyHints()) drawKeycap('SPACE', ax, oy - 32, 'center');
+    } else {
+      drawOrb(ax, oy, 16, 0, '#7a46b0', '#2a0c4a');
+      drawIcon('lock', ax - 4, oy - 7, '#6f6d8d');
+      text('W10', ax, oy + 3, 6, '#8a88a8', 'center');
+    }
+    ABILITY_BTN.x = ax - 18; ABILITY_BTN.y = oy - 18; ABILITY_BTN.w = 36; ABILITY_BTN.h = 36;
+
+    // top: wave + boss plate centre, score corner
+    text('WAVE ' + pad(game.wave, 2), W / 2, 6, 12, '#ffe600', 'center');
+    drawKillsCoins(W - 6, 6);
+    drawBossBar(22);
+    drawWaveBanners();
+    drawTouchPause(6, 6);
+  }
+
+  // ===== C: MINIMAL — Vampire Survivors / Brotato =====
+  // Experience runs across the very top, life rides under the hero where
+  // your eyes already are, the build stacks down the left edge, and the
+  // ability button sits in the bottom-right thumb corner.
+  function renderHUDMinimal() {
+    var p = game.player;
+    // full-width XP bar + level chip
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, 6);
+    ctx.fillStyle = '#0a2a33';
+    ctx.fillRect(1, 1, W - 2, 4);
+    ctx.fillStyle = '#3fd2ff';
+    ctx.fillRect(1, 1, Math.round((W - 2) * clamp(game.xp / xpForNext(), 0, 1)), 4);
+    var lv = 'LV ' + game.level;
+    var lw = measureText(lv, 6) + 8;
+    drawPanel(W - lw - 4, 4, lw, 11, { fill: '#082430', border: '#3fd2ff', flat: true });
+    text(lv, W - 4 - lw / 2, 7, 6, '#cdf4ff', 'center');
+
+    // life under the hero
+    var hbw = 24, hbx = Math.round(p.x - hbw / 2), hby = Math.round(p.y + p.h / 2 + 3);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(hbx - 1, hby - 1, hbw + 2, 5);
+    ctx.fillStyle = '#3a0a10';
+    ctx.fillRect(hbx, hby, hbw, 3);
+    ctx.fillStyle = p.hp / p.maxHp < 0.3 && game.blinkOn ? '#ff8a8a' : '#ff3b3b';
+    ctx.fillRect(hbx, hby, Math.round(hbw * clamp(p.hp / p.maxHp, 0, 1)), 3);
+    // small life orb top-left for the exact numbers
+    drawHpOrb(p, 20, 26, 14);
+
+    // wave / time / score along the top
+    text('WAVE ' + pad(game.wave, 2), W / 2, 10, 8, '#ffe600', 'center');
+    text(fmtTime(game.time), W / 2, 21, 6, '#c8c8d8', 'center');
+    drawKillsCoins(W - 6, 20);
+
+    // build stacked down the left edge, two columns
+    var keys = hudUpgradeKeys(p);
+    for (var k = 0; k < keys.length; k++) {
+      var col = k % 2, row = Math.floor(k / 2);
+      drawUpgradeSlot(keys[k], p.upgradesTaken[keys[k]], 4 + col * 16, 46 + row * 16, 14);
+    }
+
+    // ability in the right-thumb corner
+    drawAbilitySocket(p, W - 34, H - 34, 28, 'SPACE');
+    drawBossBar(34);
+    drawWaveBanners();
+    drawTouchPause(W - 24, 46);
+  }
+
 
   // ---------------------------------------------------------------------------
   // SCANLINES
@@ -5933,6 +6308,8 @@
   }
 
   function renderClassSelect() {
+    if (CLS_STYLE === 'ring') { renderClassRing(); return; }
+    if (CLS_STYLE === 'roster') { renderClassRoster(); return; }
     drawMenuBackdrop(0.86);
     drawHeader('CHOOSE YOUR CLASS', null);
     drawWallet();
@@ -5965,6 +6342,200 @@
       onClick: function () { selectClassByIndex(classSelFocus); } });
     drawHints([['1-5', 'PICK'], ['ARROWS', 'BROWSE'], ['ENTER', 'SELECT'], ['ESC', 'BACK']], 'TAP A CLASS TO PLAY');
   }
+  // ---------------------------------------------------------------------------
+  // CLASS SELECT PROTOTYPES — ?cls=ring|roster (no parameter = current screen)
+  // ---------------------------------------------------------------------------
+  var CLS_STYLE = urlParam('cls', 'current');
+  var clsRingRot = 0;   // eased ring angle, in class slots
+
+  function rotateClassRing(dir) {
+    var n = CLASSES.length;
+    classSelFocus = (classSelFocus + dir + n) % n;
+    classUnlockPending = null;
+    playUiMove();
+  }
+
+  function drawStatBars(cls, x, y, segW) {
+    var labels = ['HP', 'SPD', 'PWR'];
+    segW = segW || 9;
+    for (var s = 0; s < 3; s++) {
+      var sy = y + s * 11;
+      text(labels[s], x, sy, 6, UI.muted);
+      for (var sg = 0; sg < 5; sg++) {
+        ctx.fillStyle = sg < cls.bars[s] ? cls.color : '#26263a';
+        ctx.fillRect(x + 26 + sg * segW, sy, segW - 2, 6);
+      }
+    }
+  }
+
+  // the two subclasses this hero can become at wave 10
+  function drawAscendancyPreview(cls, x, y, w) {
+    var pair = ASCENDANCIES[cls.id] || [];
+    text('ASCENDS AT WAVE 10 INTO', x, y, 6, UI.dim);
+    var cw = Math.floor((w - 6) / 2);
+    for (var i = 0; i < pair.length; i++) {
+      var a = pair[i], ax = x + i * (cw + 6), ay = y + 10;
+      drawPanel(ax, ay, cw, 24, { fill: '#0b0b16', border: hexToRgba(a.color, 0.7), flat: true });
+      var art = CARD_ART[a.id];
+      if (art) drawPixelIcon(art, ax + 6, ay + 6, 1);
+      text(a.name, ax + 22, ay + 5, 6, a.color);
+      text(a.active.split(':')[0], ax + 22, ay + 14, 6, UI.muted);
+    }
+  }
+
+  function drawClassStartButtons(cls, y) {
+    var owned = classOwned(cls);
+    uiButton({ id: 'skins', x: W / 2 - 124, y: y, w: 120, h: 22, icon: 'skins', label: 'SKINS', align: 'center',
+      iconColor: chromaColor(), onClick: function () { openWardrobe('classselect', cls.id); } });
+    uiButton({ id: 'start', x: W / 2 + 4, y: y, w: 120, h: 22, kind: 'primary', icon: owned ? 'play' : 'lock',
+      isDefault: true,
+      label: owned ? 'START RUN' : (classUnlockPending === cls.id ? 'CONFIRM BUY' : 'UNLOCK ' + cls.price), align: 'center',
+      onClick: function () { selectClassByIndex(classSelFocus); } });
+  }
+
+  // ===== RING: heroes stand on a slowly turning ring; the front one is yours =====
+  function renderClassRing() {
+    drawMenuBackdrop(0.86);
+    drawHeader('CHOOSE YOUR HERO', null);
+    drawWallet();
+    var n = CLASSES.length;
+    // ease the ring toward the focused slot along the short way round
+    var target = classSelFocus, d = target - clsRingRot;
+    d = ((d % n) + n * 1.5) % n - n / 2;
+    clsRingRot += d * Math.min(1, frameDt * 10);
+
+    var cx = W / 2, cy = 96, rx = 150, ry = 26;
+    var order = [];
+    for (var i = 0; i < n; i++) {
+      var a = (i - clsRingRot) / n * Math.PI * 2;
+      order.push({ i: i, x: cx + Math.sin(a) * rx, depth: Math.cos(a), y: cy + Math.cos(a) * ry });
+    }
+    order.sort(function (p, q) { return p.depth - q.depth; });
+    // torch-lit floor glow under the front hero
+    ctx.fillStyle = 'rgba(255,190,90,0.10)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + ry + 30, 54, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,190,90,0.08)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + ry + 30, 80, 15, 0, 0, Math.PI * 2); ctx.fill();
+    for (var k = 0; k < order.length; k++) {
+      var o = order[k], cls = CLASSES[o.i];
+      var t = (o.depth + 1) / 2;              // 0 back .. 1 front
+      var size = Math.round(20 + t * 44);     // 20px at the back, 64px in front
+      var hx = Math.round(o.x - size / 2), hy = Math.round(o.y + 30 - size);
+      ctx.globalAlpha = 0.35 + 0.65 * t;
+      // shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath(); ctx.ellipse(o.x, o.y + 30, size * 0.32, size * 0.08, 0, 0, Math.PI * 2); ctx.fill();
+      drawHeroIcon(cls.id, hx, hy, size);
+      if (!classOwned(cls)) drawIcon('lock', o.x - 4, hy + size / 2 - 4, UI.gold, size > 40 ? 2 : 1);
+      ctx.globalAlpha = 1;
+      // every hero is clickable: front = select, others = rotate to them
+      (function (idx, bx, by, bs) {
+        uiButton({ id: 'ring_' + idx, x: bx, y: by, w: bs, h: bs, nav: false,
+          onClick: function () { if (idx === classSelFocus) selectClassByIndex(idx); else { classSelFocus = idx; classUnlockPending = null; } },
+          draw: function () {} });
+      })(o.i, hx, hy, size);
+    }
+    // arrows
+    uiButton({ id: 'prev', x: 20, y: 90, w: 22, h: 30, nav: false, onClick: function () { rotateClassRing(-1); },
+      draw: function (b) { text('<', b.x + 11, b.y + 8, 16, UI.gold, 'center'); } });
+    uiButton({ id: 'next', x: W - 42, y: 90, w: 22, h: 30, nav: false, onClick: function () { rotateClassRing(1); },
+      draw: function (b) { text('>', b.x + 11, b.y + 8, 16, UI.gold, 'center'); } });
+
+    // the focused hero's sheet
+    var c = CLASSES[classSelFocus];
+    drawTitleText(c.name, W / 2, 160, 16, classTextColor(c.id), '#000');
+    text(CLASS_BLURB[c.id] + '  -  ' + CLASS_DESC[c.id], W / 2, 180, 6, UI.text, 'center');
+    // stats left, ascendancies right
+    drawPanel(18, 188, 150, 38, { fill: 'rgba(14,14,27,0.92)', flat: true });
+    drawStatBars(c, 26, 193, 10);
+    drawPanel(176, 188, 286, 38, { fill: 'rgba(14,14,27,0.92)', flat: true });
+    drawAscendancyPreview(c, 182, 191, 274);
+    // dots: where you are in the roster
+    for (var dI = 0; dI < n; dI++) {
+      ctx.fillStyle = dI === classSelFocus ? UI.gold : '#3a3a58';
+      ctx.fillRect(W / 2 - n * 5 + dI * 10, 155, 6, 3);
+    }
+    drawClassStartButtons(c, 230);
+    drawHints([['A / D', 'ROTATE'], ['ENTER', 'START'], ['ESC', 'BACK']], 'SWIPE TO ROTATE - TAP START');
+  }
+
+  // ===== ROSTER: portrait grid on the left, full hero sheet on the right =====
+  function renderClassRoster() {
+    drawMenuBackdrop(0.86);
+    drawHeader('CHOOSE YOUR HERO', null);
+    drawWallet();
+    // roster grid (room for future heroes: empty slots read "SOON")
+    var gx = 18, gy = 46, tile = 46, gap = 6, cols = 3, slots = 9;
+    drawPanel(gx - 6, gy - 6, cols * (tile + gap) - gap + 12, 3 * (tile + gap) - gap + 12, { fill: 'rgba(14,14,27,0.9)' });
+    for (var i = 0; i < slots; i++) {
+      var tx = gx + (i % cols) * (tile + gap), ty = gy + Math.floor(i / cols) * (tile + gap);
+      if (i >= CLASSES.length) {
+        drawPanel(tx, ty, tile, tile, { fill: '#09090f', border: '#1c1c2c', flat: true });
+        text('?', tx + tile / 2, ty + tile / 2 - 5, 10, '#2a2a40', 'center');
+        continue;
+      }
+      (function (idx, x, y) {
+        var cls = CLASSES[idx];
+        uiButton({ id: 'roster_' + cls.id, x: x, y: y, w: tile, h: tile, isDefault: cls.id === currentClass,
+          onClick: function () { if (classSelFocus === idx) selectClassByIndex(idx); else { classSelFocus = idx; classUnlockPending = null; } },
+          draw: function (b, hot) {
+            var sel = classSelFocus === idx;
+            drawPanel(b.x, b.y, b.w, b.h, { fill: sel ? '#1b1b33' : '#0d0d18', border: hot ? UI.gold : (sel ? cls.color : UI.line), flat: true });
+            if (!classOwned(cls)) ctx.globalAlpha = 0.4;
+            drawHeroIcon(cls.id, b.x + 7, b.y + 4, 32);
+            ctx.globalAlpha = 1;
+            if (!classOwned(cls)) drawIcon('lock', b.x + b.w - 11, b.y + 3, UI.gold);
+            if (showKeyHints()) text(String(idx + 1), b.x + 3, b.y + 3, 6, UI.dim);
+            ctx.fillStyle = sel ? cls.color : 'rgba(0,0,0,0)';
+            ctx.fillRect(b.x + 1, b.y + b.h - 3, b.w - 2, 2);
+          } });
+      })(i, tx, ty);
+    }
+    // keyboard browsing inspects the hero under the cursor; mouse/touch
+    // inspect on the first click and start on the second
+    var f = uiFocused();
+    if (lastInput === 'key' && f && f.id.indexOf('roster_') === 0) {
+      for (var fi = 0; fi < CLASSES.length; fi++) if ('roster_' + CLASSES[fi].id === f.id) classSelFocus = fi;
+    }
+
+    // hero sheet
+    var c = CLASSES[classSelFocus];
+    var px = 178, pw = W - px - 12, py = 40, ph = 182;
+    drawPanel(px, py, pw, ph, { fill: 'rgba(14,14,27,0.95)', accent: c.color });
+    drawPanel(px + 10, py + 12, 72, 72, { fill: '#0a0a14', border: UI.line, flat: true });
+    if (!classOwned(c)) ctx.globalAlpha = 0.45;
+    drawHeroIcon(c.id, px + 14, py + 16, 64);
+    ctx.globalAlpha = 1;
+    drawTitleText(c.name, px + 92, py + 14, 12, classTextColor(c.id), '#000', 'left');
+    text(CLASS_BLURB[c.id], px + 92, py + 32, 6, classTextColor(c.id));
+    drawStatBars(c, px + 92, py + 46, 10);
+    var fire = c.cooldown.toFixed(c.cooldown < 1 ? 2 : 1);
+    text('HP ' + c.hp + '   SPEED ' + c.speed + '   DAMAGE ' + c.damage + '   FIRE ' + fire + 's', px + 10, py + 92, 6, UI.muted);
+    wrapLeft(CLASS_DESC[c.id], px + 10, py + 106, 6, UI.text, pw - 20);
+    drawAscendancyPreview(c, px + 10, py + 128, pw - 20);
+    if (!classOwned(c)) {
+      text('LOCKED - UNLOCK FOR', px + 10, py + 166, 6, UI.muted);
+      drawCoinAmount(px + 10 + measureText('LOCKED - UNLOCK FOR ', 6), py + 165, c.price, 'left', 8, runData.coins >= c.price ? UI.gold : '#c05050');
+    }
+    drawClassStartButtons(c, 229);
+    drawHints([['ARROWS', 'BROWSE'], ['ENTER', 'START'], ['ESC', 'BACK']], 'TAP A HERO, THEN START');
+  }
+
+  // left-aligned word wrap (wrapText centres)
+  function wrapLeft(str, x, y, size, color, maxW) {
+    var words = str.split(' '), line = '', l = 0;
+    for (var i = 0; i < words.length; i++) {
+      var test = line ? line + ' ' + words[i] : words[i];
+      if (measureText(test, size) > maxW && line) {
+        text(line, x, y + l * (size + 3), size, color);
+        l++;
+        line = words[i];
+      } else line = test;
+    }
+    if (line) text(line, x, y + l * (size + 3), size, color);
+    return l + 1;
+  }
+
 
   // Small colored "tome" book icon (distinct colour per tome).
   function drawTomeIcon(color, x, y, s) {

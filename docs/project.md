@@ -23,7 +23,7 @@ Search for these section headers:
 
 | Section | What lives there |
 |---|---|
-| `CANVAS & RESOLUTION` | Logical 480x270 space, render scale `RS` (see below) |
+| `CANVAS & RESOLUTION` | Logical 480x270 space, canvas sized to the screen's real pixels (see below) |
 | `WEB AUDIO` / `MUSIC` | Synth sound effects and the chiptune tracks |
 | `UPGRADE DEFINITIONS`, `VAULT SHOP`, `HERO SKINS`, `ASCENDANCIES` | Game data |
 | `GLOBAL LEADERBOARD`, `PLAYER ACCOUNTS` | Calls to `/api/...` |
@@ -34,10 +34,11 @@ Search for these section headers:
 
 ### Why the text is sharp
 
-The canvas is `RS` times bigger than 480x270 (`RS` is 1 to 4, picked from the
-window size and pixel density) and each frame starts with `setTransform(RS…)`.
-Layout code keeps using 480x270 coordinates, but text and shapes get drawn at
-the screen's real resolution. Pixel art still uses nearest-neighbour scaling.
+The canvas matches the screen's real pixel size (capped at 2880x1620) and each
+frame starts with `setTransform` scaled up from 480x270. Layout code keeps using
+480x270 coordinates, but text and shapes get drawn at full resolution and
+nothing is resampled afterwards. Pixel art still uses nearest-neighbour scaling,
+and the floor is one cached image, so tiles can't seam.
 
 ### How menus work
 

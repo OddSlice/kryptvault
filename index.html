@@ -124,13 +124,13 @@
 
   // Scale factor used to translate mouse coords into game coords.
   var scale = 1, offsetX = 0, offsetY = 0;
-  // RS: integer render scale. The game is laid out in a 480x270 logical
-  // space, but the canvas backing store is RS times larger so text and
-  // shapes rasterise at (roughly) the display's real resolution instead of
-  // being drawn at 480x270 and smeared upwards. Sprites stay nearest-
-  // neighbour, so pixel art is unchanged; RS is an integer so tiles never
-  // seam. Capped at 4 to keep fill cost sane on big/hi-dpi screens.
-  var RS = 1;
+  // Render scale. The game is laid out in a 480x270 logical space, but
+  // the canvas backing store matches the display's real pixel size, so text
+  // and shapes are drawn at full resolution and nothing gets resampled (an
+  // integer scale had to be shrunk to fit, which blurred everything at sizes
+  // like 1366x768). Sprites stay nearest-neighbour. The floor and walls are
+  // one cached image, so a fractional scale can't open seams between tiles.
+  // Capped at 6 (a 2880x1620 canvas) to keep fill cost sane on huge screens.
   function computeScale() {
     var sx = window.innerWidth / W;
     var sy = window.innerHeight / H;
@@ -142,18 +142,16 @@
     offsetY = (window.innerHeight - dispH) / 2;
 
     var dpr = window.devicePixelRatio || 1;
-    var rs = clampInt(Math.ceil(scale * dpr - 0.05), 1, 4);
-    if (rs !== RS || canvas.width !== W * rs) {
-      RS = rs;
-      canvas.width = W * RS;
-      canvas.height = H * RS;
+    var rs = Math.max(1, Math.min(scale * dpr, 6));
+    var cw = Math.round(W * rs), ch = Math.round(H * rs);
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
       ctx.imageSmoothingEnabled = false;
     }
-    // rendering at or above display size: let the browser downsample
-    // smoothly; below it (capped scale on huge screens): keep pixels square
-    if (canvas.style) canvas.style.imageRendering = (W * RS >= dispW * dpr - 1) ? 'auto' : 'pixelated';
+    // only resampled when capped on a huge screen: keep pixels square then
+    if (canvas.style) canvas.style.imageRendering = 'pixelated';
   }
-  function clampInt(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
   computeScale();
   window.addEventListener('resize', computeScale);
 
@@ -161,7 +159,6 @@
   // SPRITE LOADING — embedded base64 (no CORS), procedural fallback as safety.
   // ---------------------------------------------------------------------------
   var useProceduralSprites = false;
-  var uiSpriteLoaded = false; // UI sheet no longer used; cards drawn procedurally.
 
   var spritesheet = new Image();
   var sheetReady = false;
@@ -635,7 +632,7 @@
     keys[e.code] = true;
     var s = game.gameState, c = e.code;
     if (s === 'nameentry') {
-      if (c === 'Escape') goBack();
+      if (c === 'Escape') { if (!e.repeat) goBack(); }
       else if (c === 'Enter' || c === 'NumpadEnter') confirmName();
       else if (document.activeElement !== nameInput) {
         // fallback for when the hidden input isn't handling keys; when it IS
@@ -648,7 +645,7 @@
         }
       }
     } else if (s === 'login') {
-      if (c === 'Escape') goBack();
+      if (c === 'Escape') { if (!e.repeat) goBack(); }
       else if (c === 'Enter' || c === 'NumpadEnter') tryLoginSubmit();
       else if (document.activeElement !== loginInput) {
         // fallback physical-key entry when the hidden input isn't capturing keys;
@@ -670,9 +667,9 @@
       if (!e.repeat) draftKey(c);
     } else if (s === 'playing') {
       if (c === 'Space') castAbility();
-      else if (c === 'KeyP' || c === 'Escape') game.gameState = 'paused';
+      else if ((c === 'KeyP' || c === 'Escape') && !e.repeat) game.gameState = 'paused';
     } else if (s === 'paused') {
-      if (c === 'KeyP' || c === 'Escape') game.gameState = 'playing';
+      if (c === 'KeyP' || c === 'Escape') { if (!e.repeat) game.gameState = 'playing'; }
       else menuKey(c, e);
     } else if (UI_NAV_STATES[s]) {
       menuKey(c, e);
@@ -695,8 +692,10 @@
     else if (c === 'ArrowDown' || c === 'KeyS') uiNav(0, 1);
     else if (c === 'ArrowLeft' || c === 'KeyA') uiNav(-1, 0);
     else if (c === 'ArrowRight' || c === 'KeyD') uiNav(1, 0);
-    else if (c === 'Enter' || c === 'NumpadEnter' || c === 'Space') { if (!e.repeat) uiActivate(); }
-    else if (c === 'Escape' || c === 'Backspace') {
+    // Enter only: Space is the ability key, and players are still mashing
+    // it when a run ends, so it must not click through game over
+    else if (c === 'Enter' || c === 'NumpadEnter') { if (!e.repeat) uiActivate(); }
+    else if ((c === 'Escape' || c === 'Backspace') && !e.repeat) {
       if (s === 'gameover') { if (!(game.overLock > 0)) leaveGameOver(false); }
       else if (BACK_STATES[s]) goBack();
     }
@@ -1054,8 +1053,11 @@
   var EPIC_SKIN_WAVE = 20; // epic skins unlock only after reaching this wave
   var skinPending = null;      // skin id armed for a confirm-tap purchase
   var wardrobeClass = 'warrior'; // which character's skins the wardrobe is showing
-  var wardrobeScroll = 0;      // horizontal card-scroll offset (px)
   var wardrobeFrom = 'title';  // return target: 'title' or 'classselect'
+
+  function toastNeedCoins(price) {
+    game.toasts.push({ txt: 'NEED ' + price + 'c, YOU HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
+  }
 
   // Buy the next level of a tome with coins.
   function tryBuyShopItem(idx) {
@@ -1065,7 +1067,7 @@
     if (lvl >= 5) return;
     var price = SHOP_PRICES[lvl];
     if (runData.coins < price) {
-      game.toasts.push({ txt: 'NEED ' + price + 'c, YOU HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
+      toastNeedCoins(price);
       return;
     }
     runData.coins -= price;
@@ -1112,7 +1114,7 @@
 
   // The chroma tint colour for epic skins, morphing hue over time.
   function chromaColor() {
-    return 'hsl(' + Math.floor((game.time * 90) % 360) + ',95%,58%)';
+    return 'hsl(' + Math.floor((uiTime * 90) % 360) + ',95%,58%)';
   }
 
   // Buy (two-tap confirm), equip, or report why a skin can't be selected.
@@ -1140,12 +1142,12 @@
         saveRunData();
         game.toasts.push({ txt: skin.name + ' UNLOCKED!', t: 0 });
       } else {
-        game.toasts.push({ txt: 'NEED ' + skin.price + 'c, YOU HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
+        toastNeedCoins(skin.price);
       }
     } else if (runData.coins >= skin.price) {
       skinPending = id;
     } else {
-      game.toasts.push({ txt: 'NEED ' + skin.price + 'c, YOU HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
+      toastNeedCoins(skin.price);
     }
   }
 
@@ -1460,14 +1462,20 @@
   var API_SCORES = '/api/scores';
   var API_RPC = '/api/rpc/';
 
+  // cb gets the result, or undefined on a network error or after 10 seconds
   function sbRpc(fn, body, cb) {
+    var done = false;
+    function finish(v) { if (!done) { done = true; clearTimeout(timer); cb(v); } }
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); finish(undefined); }, 10000);
     fetch(API_RPC + fn, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: ctrl ? ctrl.signal : undefined
     }).then(function (r) { return r.json(); })
-      .then(cb)
-      .catch(function () { cb(undefined); });
+      .then(finish)
+      .catch(function () { finish(undefined); });
   }
 
   // ---------------------------------------------------------------------------
@@ -1687,7 +1695,6 @@
   function openWardrobe(from, classId) {
     wardrobeFrom = from;
     wardrobeClass = classId || wardrobeClass || 'warrior';
-    wardrobeScroll = 0;
     skinPending = null;
     game.gameState = 'wardrobe';
   }
@@ -1700,6 +1707,7 @@
 
   function enterClassSelect() {
     classUnlockPending = null;
+    classSelArmed = -1;
     classInfoOpen = false;   // always open on the stat bars
     classSelFocus = classIndex(currentClass);
     game.gameState = 'classselect';
@@ -1725,12 +1733,12 @@
         saveRunData();
         game.toasts.push({ txt: cls.name + ' UNLOCKED!', t: 0 });
       } else {
-        game.toasts.push({ txt: 'NEED ' + cls.price + 'c, YOU HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
+        toastNeedCoins(cls.price);
       }
     } else if (runData.coins >= cls.price) {
       classUnlockPending = cls.id;
     } else {
-      game.toasts.push({ txt: 'NEED ' + cls.price + 'c, YOU HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
+      toastNeedCoins(cls.price);
     }
   }
 
@@ -2532,6 +2540,8 @@
   // ASCENDANCY — draft screen, pick handling, and the spacebar active
   // ---------------------------------------------------------------------------
   function triggerAscend() {
+    // the same frame can level you up and kill the boss: keep that draft for later
+    if (game.gameState === 'levelup') game.pendingLevelUps = (game.pendingLevelUps || 0) + 1;
     game.gameState = 'ascend';
     game.draftLock = DRAFT_LOCK;
     game.cardFocus = 0;
@@ -3609,6 +3619,8 @@
     if (game.gameState === 'gameover') return;
     game.gameState = 'gameover';
     game.overLock = 0.8;
+    game.shakeTimer = 0;   // don't freeze a mid-shake frame into the results backdrop
+    gameOverBg = null;
     game.newRecord = false;
     if (game.wave > runData.bestWave) { runData.bestWave = game.wave; game.newRecord = true; }
     if (game.score > runData.bestKills) { runData.bestKills = game.score; game.newRecord = true; }
@@ -4857,8 +4869,7 @@
     cross:    ['#......#', '.#....#.', '..#..#..', '...##...', '...##...', '..#..#..', '.#....#.', '#......#'],
     lock:     ['..####..', '.#....#.', '.#....#.', '########', '###..###', '###..###', '########', '........'],
     check:    ['........', '.......#', '......##', '#....##.', '##..##..', '.####...', '..##....', '........'],
-    star:     ['...##...', '...##...', '########', '.######.', '..####..', '.##..##.', '##....##', '........'],
-    user:     ['...##...', '..####..', '..####..', '...##...', '.######.', '########', '########', '........']
+    star:     ['...##...', '...##...', '########', '.######.', '..####..', '.##..##.', '##....##', '........']
   };
   function drawIcon(name, x, y, color, s) {
     var rows = ICONS[name];
@@ -4986,9 +4997,6 @@
     text(s, lx + 10, y, size, color || UI.gold);
     return w;
   }
-  // legacy wrappers (centred 6px coin text / the player's balance)
-  function drawCoinText(cx, y, s) { drawCoinAmount(cx, y, s, 'center', 6); }
-  function drawCoinBalance(cx, y) { drawCoinAmount(cx, y, Math.round(runData.coins), 'center', 8); }
   // the balance chip in the top-right corner of shop-like screens
   function drawWallet() { drawCoinAmount(W - 10, 12, Math.round(runData.coins), 'right', 8); }
 
@@ -5017,7 +5025,7 @@
   var uiFocusState = null;
   var uiFocusMem = {};       // per-screen remembered focus (by button id)
   var uiWantId = null;
-  var UI_NO_FOCUS_MEMORY = { gameover: 1, paused: 1, feedback: 1, accountinfo: 1, nameentry: 1, login: 1 };
+  var UI_NO_FOCUS_MEMORY = { title: 1, gameover: 1, paused: 1, feedback: 1, accountinfo: 1, nameentry: 1, login: 1 };
   var pauseEndArmed = false; // END RUN needs a second press
 
   function uiBegin() {
@@ -5081,7 +5089,11 @@
       var score = along + across * 2.2;
       if (score < bestScore) { bestScore = score; best = i; }
     }
-    if (best >= 0) { uiFocus = best; playUiMove(); }
+    if (best >= 0) {
+      uiFocus = best;
+      playUiMove();
+      if (uiButtons[best].onFocus) uiButtons[best].onFocus();
+    }
   }
   function uiActivate() {
     if (uiButtonsState !== game.gameState) return;
@@ -5092,7 +5104,8 @@
 
   // b: { id, x, y, w, h, label, onClick, kind ('primary'|'danger'|normal),
   //      icon, iconColor, size, align ('center'), right(xr, cy, hot),
-  //      disabled, isDefault, nav (false = mouse only), draw(b, hot) }
+  //      disabled, isDefault, nav (false = mouse only), draw(b, hot),
+  //      onFocus() (called when arrow keys land on it) }
   function uiButton(b) {
     var idx = uiButtons.length;
     uiButtons.push(b);
@@ -5130,6 +5143,8 @@
 
   // ----- shared dungeon backdrop for every menu -----
   var frameDt = 1 / 60;  // set by the game loop; menu ambience moves by it
+  var uiTime = 0;        // seconds since load; menus animate off this because
+                         // game.time only advances while a run is playing
   var menuCritters = [];
   function initMenuBackdrop() {
     if (walls.length === 0) { walls = generateWalls(3); bgDirty = true; }
@@ -5284,7 +5299,7 @@
       onClick: function () { openWardrobe('title', currentClass); },
       right: function (xr, cy) {
         if (newSkin) {
-          var pulse = 0.55 + 0.45 * Math.sin(game.time * 5);
+          var pulse = 0.55 + 0.45 * Math.sin(uiTime * 5);
           ctx.globalAlpha = pulse;
           drawPanel(xr - 26, cy - 6, 26, 12, { fill: '#3a0d30', border: UI.pink, flat: true });
           ctx.globalAlpha = 1;
@@ -5342,7 +5357,7 @@
     var ry0 = y + 37, pitch = 14;
     var msgY = y + h / 2 + 4;
     if (leaderboard.state === 'loading' || leaderboard.state === 'idle') {
-      var dots = '...'.slice(0, 1 + Math.floor(game.time * 3) % 3);
+      var dots = '...'.slice(0, 1 + Math.floor(uiTime * 3) % 3);
       text('LOADING' + dots, x + w / 2, msgY, 8, UI.muted, 'center');
       return;
     }
@@ -5451,7 +5466,7 @@
         onClick: function () { copyText(runData.playerSecret, 'VAULT KEY COPIED'); } });
       n++;
     }
-    uiButton({ id: 'newacct', x: bx, y: by + n * 26, w: bw, h: bh, icon: 'user',
+    uiButton({ id: 'newacct', x: bx, y: by + n * 26, w: bw, h: bh, icon: 'account',
       label: runData.name ? 'NEW NAME / ACCOUNT' : 'CHOOSE A NAME',
       onClick: function () { enterNameEntry('title'); } });
     uiButton({ id: 'loginpc', x: bx, y: by + (n + 1) * 26, w: bw, h: bh, icon: 'key', label: 'LOG IN WITH KEY',
@@ -5491,7 +5506,7 @@
 
     var sy = 146;
     if (loginForm.state === 'checking') {
-      text('CHECKING' + '...'.slice(0, 1 + Math.floor(game.time * 3) % 3), W / 2, sy, 8, UI.gold, 'center');
+      text('CHECKING' + '...'.slice(0, 1 + Math.floor(uiTime * 3) % 3), W / 2, sy, 8, UI.gold, 'center');
     } else if (loginForm.state === 'fail') {
       text('NO MATCH. CHECK YOUR TAG AND KEY', W / 2, sy, 8, UI.red, 'center');
     } else if (loginForm.state === 'offline') {
@@ -5510,7 +5525,7 @@
     drawMenuBackdrop(0.86);
     if (account.state === 'creating') {
       drawHeader('CREATING ACCOUNT', null);
-      text('CLAIMING YOUR TAG' + '...'.slice(0, 1 + Math.floor(game.time * 3) % 3), W / 2, 120, 8, UI.muted, 'center');
+      text('CLAIMING YOUR TAG' + '...'.slice(0, 1 + Math.floor(uiTime * 3) % 3), W / 2, 120, 8, UI.muted, 'center');
       return;
     }
     if (account.state === 'created') {
@@ -5566,12 +5581,22 @@
     }
   }
 
+  // the frozen arena behind the results never changes, so it's drawn once
+  // into a buffer and blitted every frame after that
+  var gameOverBg = null;
   function renderGameOver() {
-    // the frozen arena behind a blood-red veil
-    renderWorld();
-    ctx.fillStyle = 'rgba(26,0,4,0.86)';
-    ctx.fillRect(0, 0, W, H);
-    drawVignette();
+    if (!gameOverBg || gameOverBg.width !== canvas.width) {
+      renderWorld();
+      ctx.fillStyle = 'rgba(26,0,4,0.86)';
+      ctx.fillRect(0, 0, W, H);
+      drawVignette();
+      var buf = document.createElement('canvas');
+      buf.width = canvas.width; buf.height = canvas.height;
+      var bctx = buf.getContext('2d');
+      if (bctx && bctx.drawImage) { bctx.drawImage(canvas, 0, 0); gameOverBg = buf; }
+    } else {
+      ctx.drawImage(gameOverBg, 0, 0, W, H);
+    }
     drawAnimatedScanlines(0.04);
 
     drawTitleText('YOU DIED', W / 2, 12, 24, '#ff3b3b', '#4a0000');
@@ -5859,7 +5884,8 @@
   }
 
   // ----- CLASS SELECT: hero roster on the left, the chosen hero's sheet on the right -----
-  var classSelFocus = 0;   // the hero whose sheet is showing
+  var classSelFocus = 0;     // the hero whose sheet is showing
+  var classSelArmed = -1;    // hero clicked once this visit; a second click starts
   var classInfoOpen = false; // (i) toggles exact numbers + description
 
   function drawStatBars(cls, x, y) {
@@ -5886,9 +5912,12 @@
     }
   }
 
+  // keyboard: the sheet already follows the cursor, so Enter starts.
+  // mouse/touch: the first click shows the hero, the second starts the run.
   function selectRosterHero(idx) {
-    if (classSelFocus === idx) { selectClassByIndex(idx); return; }
+    if (lastInput === 'key' || classSelArmed === idx) { selectClassByIndex(idx); return; }
     classSelFocus = idx;
+    classSelArmed = idx;
     classUnlockPending = null;
   }
 
@@ -5911,6 +5940,7 @@
         var cls = CLASSES[idx];
         uiButton({ id: 'roster_' + cls.id, x: x, y: y, w: tileW, h: tileH, isDefault: idx === classSelFocus,
           onClick: function () { selectRosterHero(idx); },
+          onFocus: function () { classSelFocus = idx; classUnlockPending = null; },
           draw: function (b, hot) {
             var sel = classSelFocus === idx, owned = classOwned(cls);
             drawPanel(b.x, b.y, b.w, b.h, { fill: sel ? '#1b1b33' : '#0d0d18', border: hot ? UI.gold : (sel ? cls.color : UI.line), flat: true });
@@ -5923,12 +5953,6 @@
             if (sel) { ctx.fillStyle = cls.color; ctx.fillRect(b.x + 1, b.y + b.h - 3, b.w - 2, 2); }
           } });
       })(i, tx, ty);
-    }
-    // keyboard browsing shows the sheet of the hero under the cursor;
-    // mouse and touch show it on the first click and start on the second
-    var f = uiFocused();
-    if (lastInput === 'key' && f && f.id.indexOf('roster_') === 0) {
-      for (var fi = 0; fi < CLASSES.length; fi++) if ('roster_' + CLASSES[fi].id === f.id) classSelFocus = fi;
     }
 
     // ----- hero sheet -----
@@ -5965,7 +5989,7 @@
       text(a.name, ax + 20, ay + 17, 6, a.color);
     }
     if (classInfoOpen) {
-      wrapLeft(CLASS_DESC[c.id], px + 12, ay + 37, 6, UI.text, pw - 24);
+      wrapText(CLASS_DESC[c.id], px + 12, ay + 37, 6, UI.text, pw - 24, 'left');
     } else if (!owned) {
       text('UNLOCK FOR', px + 12, ay + 40, 6, UI.muted);
       drawCoinAmount(px + 12 + measureText('UNLOCK FOR ', 6), ay + 39, c.price, 'left', 8, runData.coins >= c.price ? UI.gold : '#c05050');
@@ -5979,20 +6003,6 @@
     drawHints([['ARROWS', 'BROWSE'], ['I', 'INFO'], ['ENTER', 'START'], ['ESC', 'BACK']], 'TAP A HERO, THEN START');
   }
 
-  // left-aligned word wrap (wrapText centres)
-  function wrapLeft(str, x, y, size, color, maxW) {
-    var words = str.split(' '), line = '', l = 0;
-    for (var i = 0; i < words.length; i++) {
-      var test = line ? line + ' ' + words[i] : words[i];
-      if (measureText(test, size) > maxW && line) {
-        text(line, x, y + l * (size + 3), size, color);
-        l++;
-        line = words[i];
-      } else line = test;
-    }
-    if (line) text(line, x, y + l * (size + 3), size, color);
-    return l + 1;
-  }
 
 
   // Small colored "tome" book icon (distinct colour per tome).
@@ -6094,9 +6104,10 @@
     var tint = skin.chroma ? chromaColor() : skin.tint;
     if (tint) {
       if (skin.chroma) {
-        ctx.globalAlpha = 0.28 + 0.15 * Math.sin(game.time * 6);
+        var a0 = ctx.globalAlpha;   // keep the caller's dimming (locked skins)
+        ctx.globalAlpha = a0 * (0.28 + 0.15 * Math.sin(uiTime * 6));
         drawTintedTile(tile, x - 2, y - 2, size + 4, size + 4, false, tint, 1);
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = a0;
       }
       if (!drawTintedTile(tile, x, y, size, size, false, tint, skin.chroma ? 0.62 : 0.5)) {
         ctx.fillStyle = tint; ctx.fillRect(x, y, size, size);
@@ -6162,7 +6173,7 @@
     for (var ci = 0; ci < CLASSES.length; ci++) {
       (function (cls, tx) {
         uiButton({ id: 'tab_' + cls.id, x: tx, y: 44, w: tabW, h: 22,
-          onClick: function () { wardrobeClass = cls.id; wardrobeScroll = 0; skinPending = null; },
+          onClick: function () { wardrobeClass = cls.id; skinPending = null; },
           draw: function (b, hot) {
             var active = wardrobeClass === cls.id;
             drawPanel(b.x, b.y, b.w, b.h, { fill: active ? UI.panelHi : (hot ? UI.panel2 : 'rgba(14,14,27,0.92)'),
@@ -6253,7 +6264,7 @@
     text(evo.desc.toUpperCase(), x + 10, dy + 21, 6, UI.text);
     text('BUT: ' + evo.con, x + w - 10, dy + 21, 6, '#ff6b6b', 'right');
 
-    var tip = CODEX_TIPS[Math.floor(game.time / 5) % CODEX_TIPS.length];
+    var tip = CODEX_TIPS[Math.floor(uiTime / 5) % CODEX_TIPS.length];
     text('TIP: ' + tip, W / 2, 228, 6, UI.dim, 'center');
     drawHints([['ARROWS', 'BROWSE'], ['ESC', 'BACK']], 'TAP A RECIPE FOR DETAILS');
   }
@@ -6323,8 +6334,8 @@
     }
   }
 
-  // simple word-wrap renderer centred at cx
-  function wrapText(str, cx, y, size, color, maxW) {
+  // word-wrap renderer, centred on x unless align is 'left'; returns line count
+  function wrapText(str, cx, y, size, color, maxW, align) {
     ctx.font = size + 'px "Press Start 2P", monospace';
     var words = str.split(' ');
     var lines = [];
@@ -6340,7 +6351,7 @@
     }
     if (line) lines.push(line);
     for (var l = 0; l < lines.length; l++) {
-      text(lines[l], cx, y + l * (size + 3), size, color, 'center');
+      text(lines[l], cx, y + l * (size + 3), size, color, align || 'center');
     }
     return lines.length;
   }
@@ -6349,8 +6360,8 @@
   // MAIN RENDER
   // ---------------------------------------------------------------------------
   function render() {
-    // every frame starts from the logical 480x270 space scaled up by RS
-    ctx.setTransform(RS, 0, 0, RS, 0, 0);
+    // every frame starts from the logical 480x270 space scaled up to the canvas
+    ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
@@ -6417,6 +6428,7 @@
     lastTime = ts;
     if (dt > 0.05) dt = 0.05; // cap to avoid spiral of death
     frameDt = dt;
+    uiTime += dt;
     update(dt);
     render();
     requestAnimationFrame(loop);

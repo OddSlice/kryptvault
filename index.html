@@ -1485,16 +1485,15 @@
   var runData = loadRunData();
 
   // ---------------------------------------------------------------------------
-  // GLOBAL LEADERBOARD (Supabase REST — anon key is public by design)
+  // GLOBAL LEADERBOARD (Vercel functions in /api, backed by Neon Postgres)
   // ---------------------------------------------------------------------------
-  var SB_URL = 'https://gcsqmrdlmbpucatprbhx.supabase.co/rest/v1/scores';
-  var SB_RPC = 'https://gcsqmrdlmbpucatprbhx.supabase.co/rest/v1/rpc/';
-  var SB_KEY = 'sb_publishable_NXbGLu9daR0M6y-dLThu9w_cdFizyEJ';
+  var API_SCORES = '/api/scores';
+  var API_RPC = '/api/rpc/';
 
   function sbRpc(fn, body, cb) {
-    fetch(SB_RPC + fn, {
+    fetch(API_RPC + fn, {
       method: 'POST',
-      headers: { apikey: SB_KEY, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     }).then(function (r) { return r.json(); })
       .then(cb)
@@ -1635,11 +1634,7 @@
     leaderboard.state = 'loading';
     // fetch deep, then keep only each player's best run so one grinder
     // can't occupy half the board
-    var q = SB_URL + '?select=name,disc,wave,kills,cls&order=wave.desc,kills.desc&limit=80';
-    q += '&mode=eq.normal';
-    fetch(q, {
-      headers: { apikey: SB_KEY }
-    }).then(function (r) { return r.json(); }).then(function (rows) {
+    fetch(API_SCORES).then(function (r) { return r.json(); }).then(function (rows) {
       var best = [], seen = {};
       if (Array.isArray(rows)) {
         for (var i = 0; i < rows.length && best.length < 10; i++) {
@@ -1667,9 +1662,9 @@
   function submitScore() {
     if (!runData.name || runData.name.length !== 3) return;
     leaderboard.submitState = 'sending';
-    fetch(SB_URL, {
+    fetch(API_SCORES, {
       method: 'POST',
-      headers: { apikey: SB_KEY, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: runData.name,
         wave: game.wave,

@@ -32,6 +32,7 @@ export default async function handler(req, res) {
     // that apart from a network failure, so the null goes back as-is
     res.status(200).json(rows[0].r);
   } catch (e) {
+    console.error('[fn].js', e.message);
     res.status(400).json({ error: 'rejected' });
   }
 }

@@ -14,6 +14,7 @@ export default async function handler(req, res) {
       );
       return res.status(200).json(rows);
     } catch (e) {
+      console.error('scores.js', e.message);
       return res.status(502).json({ error: 'unavailable' });
     }
   }
@@ -34,6 +35,7 @@ export default async function handler(req, res) {
       );
       return res.status(201).end();
     } catch (e) {
+      console.error('scores.js', e.message);
       return res.status(400).json({ error: 'rejected' });
     }
   }

@@ -65,14 +65,15 @@ opens.
 - Every menu works from the keyboard: arrows or WASD, Enter to pick, Esc to go back.
 - In-run HUD (minimal layout): XP runs across the top with a LVL chip, life sits
   in a small orb with the exact numbers plus a bar under the hero, the build
-  stacks down the left edge, and the ability lives in the bottom-right thumb
-  corner. Kills and gold share one line; three placements are still being
-  compared with `?stats=orb|corner|line`. The old sound button is gone (the pause
-  menu has the toggles), and the pause button only shows for touch players.
-- Hero select is a roster: portraits on the left, the chosen hero's sheet on the
-  right (portrait, stat bars, the two ascendancies it can take at wave 10). The
-  (i) button, or the I key, swaps the bars for exact numbers and adds the
-  description. First click shows a hero, second click starts the run.
+  stacks down the left edge, kills and gold share a chip in the bottom-left
+  corner, and the ability lives in the bottom-right thumb corner. The old sound
+  button is gone (the pause menu has the toggles), and the pause button only
+  shows for touch players.
+- Hero select is a roster: the five portraits on the left, the chosen hero's
+  sheet on the right (portrait, stat bars, the two ascendancies it can take at
+  wave 10). The sheet always opens on the bars; the (i) button or the I key swaps
+  them for exact numbers and adds the description. First click shows a hero,
+  second click starts the run.
 - The Vault has a row of equipped slots and clearer equip and buy buttons, and
   it tells you when you can't afford something.
 - Skins: class tabs with portraits, bigger cards, Q and E switch class.

@@ -1700,6 +1700,7 @@
 
   function enterClassSelect() {
     classUnlockPending = null;
+    classInfoOpen = false;   // always open on the stat bars
     classSelFocus = classIndex(currentClass);
     game.gameState = 'classselect';
   }
@@ -4509,16 +4510,8 @@
 
   // HUD (Vampire Survivors-style minimal layout): experience across the very
   // top, life in a small orb top-left plus a bar under the hero, the build
-  // stacked down the left edge, the ability in the bottom-right thumb corner.
-  // Kills and gold sit on one ledger line; where that line goes is still
-  // being compared (?stats=orb|corner|line).
-  function urlParam(name, fallback) {
-    try {
-      var m = new RegExp('[?&]' + name + '=([a-z]+)').exec(window.location.search || '');
-      return m ? m[1] : fallback;
-    } catch (e) { return fallback; }
-  }
-  var STATS_STYLE = urlParam('stats', 'orb');
+  // stacked down the left edge, kills and gold in a chip bottom-left, and the
+  // ability in the bottom-right thumb corner.
   // touch players still need an on-screen pause; desktop has P / Esc
   var HUD_PAUSE = { x: 0, y: 0, w: 0, h: 0 };
 
@@ -4635,13 +4628,13 @@
     if (showKeyHints()) drawKeycap('SPACE', x + s / 2, y - 11, 'center');
   }
 
-  // kills + gold on one line; returns its width. align: 'left' | 'center'
+  // kills + gold on one line, left-aligned at x; returns its width
   function ledgerWidth(size) {
     return 13 + measureText(String(game.score), size) + 10 + 10 + measureText(String(Math.round(game.coinsEarned)), size);
   }
-  function drawLedger(x, y, size, align) {
+  function drawLedger(x, y, size) {
     var lw = ledgerWidth(size);
-    var lx = Math.round(align === 'center' ? x - lw / 2 : x);
+    var lx = Math.round(x);
     drawSkullIcon(lx, y + Math.round((size - 9) / 2));
     text(String(game.score), lx + 13, y, size, '#ffffff');
     var cx = lx + 13 + measureText(String(game.score), size) + 10;
@@ -4716,34 +4709,17 @@
     // and the exact numbers in the orb, top-left
     drawHpOrb(p, 20, 26, 14);
 
-    // run info: wave + time, kills + gold — placement depends on STATS_STYLE
-    if (STATS_STYLE === 'line') {
-      // everything about the run on one centred line under the XP bar
-      var wv = 'WAVE ' + pad(game.wave, 2), tm = fmtTime(game.time);
-      var total = measureText(wv, 8) + 14 + measureText(tm, 8) + 14 + ledgerWidth(8);
-      var x0 = Math.round(W / 2 - total / 2);
-      text(wv, x0, 10, 8, '#ffe600');
-      x0 += measureText(wv, 8) + 14;
-      text(tm, x0, 10, 8, '#c8c8d8');
-      x0 += measureText(tm, 8) + 14;
-      drawLedger(x0, 10, 8, 'left');
-    } else {
-      text('WAVE ' + pad(game.wave, 2), W / 2, 10, 8, '#ffe600', 'center');
-      text(fmtTime(game.time), W / 2, 21, 6, '#c8c8d8', 'center');
-      if (STATS_STYLE === 'corner') {
-        // bottom-left ledger chip, mirroring the ability in the other corner
-        var cw = ledgerWidth(8) + 14;
-        drawPanel(4, H - 19, cw, 15, { fill: 'rgba(8,8,16,0.72)', border: '#2b2b48', flat: true });
-        drawLedger(11, H - 15, 8, 'left');
-      } else {
-        // 'orb': the ledger rides beside the life orb
-        drawLedger(42, 22, 8, 'left');
-      }
-    }
+    // wave + time up top
+    text('WAVE ' + pad(game.wave, 2), W / 2, 10, 8, '#ffe600', 'center');
+    text(fmtTime(game.time), W / 2, 21, 6, '#c8c8d8', 'center');
+    // kills + gold: a chip bottom-left, mirroring the ability in the other corner
+    var cw = ledgerWidth(8) + 14;
+    drawPanel(4, H - 19, cw, 15, { fill: 'rgba(8,8,16,0.72)', border: '#2b2b48', flat: true });
+    drawLedger(11, H - 15, 8);
 
     // build down the left edge: two columns, a third once the run is long
     var keys = hudUpgradeKeys(p);
-    var bottom = STATS_STYLE === 'corner' ? H - 24 : H - 6;
+    var bottom = H - 24;
     var maxRows = Math.max(1, Math.floor((bottom - 46) / 16));
     var cols = Math.max(2, Math.ceil(keys.length / maxRows));
     for (var k = 0; k < keys.length; k++) {
@@ -4753,7 +4729,7 @@
 
     // ability in the right-thumb corner
     drawAbilitySocket(p, W - 34, H - 34, 28);
-    drawBossBar(STATS_STYLE === 'line' ? 24 : 34);
+    drawBossBar(34);
     drawWaveBanners();
     drawTouchPause(W - 24, 20);
   }
@@ -5922,18 +5898,15 @@
     drawWallet();
 
     var top = 50, ph = 154;
-    // ----- roster: 2 x 3 portraits, the empty slot hints at more to come -----
+    // ----- roster: 2 x 3 portraits, the odd hero out centred on the last row -----
     var gx = 18, gw = 168, tileW = 74, tileH = 42, gap = 6;
     drawPanel(gx, top, gw, ph, { fill: 'rgba(14,14,27,0.92)' });
     var tx0 = gx + Math.round((gw - (2 * tileW + gap)) / 2);
     var ty0 = top + Math.round((ph - (3 * tileH + 2 * gap)) / 2);
-    for (var i = 0; i < 6; i++) {
+    for (var i = 0; i < CLASSES.length; i++) {
       var tx = tx0 + (i % 2) * (tileW + gap), ty = ty0 + Math.floor(i / 2) * (tileH + gap);
-      if (i >= CLASSES.length) {
-        drawPanel(tx, ty, tileW, tileH, { fill: '#09090f', border: '#1c1c2c', flat: true });
-        text('?', tx + tileW / 2, ty + tileH / 2 - 5, 10, '#2a2a40', 'center');
-        continue;
-      }
+      var lastAlone = i === CLASSES.length - 1 && CLASSES.length % 2 === 1;
+      if (lastAlone) tx = gx + Math.round((gw - tileW) / 2);
       (function (idx, x, y) {
         var cls = CLASSES[idx];
         uiButton({ id: 'roster_' + cls.id, x: x, y: y, w: tileW, h: tileH, isDefault: idx === classSelFocus,

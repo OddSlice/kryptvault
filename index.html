@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '1.0a';
+  var GAME_VERSION = '1.1';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -124,6 +124,13 @@
 
   // Scale factor used to translate mouse coords into game coords.
   var scale = 1, offsetX = 0, offsetY = 0;
+  // RS: integer render scale. The game is laid out in a 480x270 logical
+  // space, but the canvas backing store is RS times larger so text and
+  // shapes rasterise at (roughly) the display's real resolution instead of
+  // being drawn at 480x270 and smeared upwards. Sprites stay nearest-
+  // neighbour, so pixel art is unchanged; RS is an integer so tiles never
+  // seam. Capped at 4 to keep fill cost sane on big/hi-dpi screens.
+  var RS = 1;
   function computeScale() {
     var sx = window.innerWidth / W;
     var sy = window.innerHeight / H;
@@ -133,7 +140,20 @@
     var dispH = H * scale;
     offsetX = (window.innerWidth - dispW) / 2;
     offsetY = (window.innerHeight - dispH) / 2;
+
+    var dpr = window.devicePixelRatio || 1;
+    var rs = clampInt(Math.ceil(scale * dpr - 0.05), 1, 4);
+    if (rs !== RS || canvas.width !== W * rs) {
+      RS = rs;
+      canvas.width = W * RS;
+      canvas.height = H * RS;
+      ctx.imageSmoothingEnabled = false;
+    }
+    // rendering at or above display size: let the browser downsample
+    // smoothly; below it (capped scale on huge screens): keep pixels square
+    if (canvas.style) canvas.style.imageRendering = (W * RS >= dispW * dpr - 1) ? 'auto' : 'pixelated';
   }
+  function clampInt(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
   computeScale();
   window.addEventListener('resize', computeScale);
 
@@ -306,6 +326,22 @@
     o.connect(g); g.connect(masterGain);
     o.start(t); o.stop(t + 0.11);
   }
+
+  // menu feedback: a soft tick when focus moves, a brighter blip on select
+  function playUiTone(f1, f2, len, vol) {
+    if (!audioCtx || sfxMuted) return;
+    var t = audioCtx.currentTime;
+    var o = audioCtx.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(f1, t);
+    o.frequency.linearRampToValueAtTime(f2, t + len);
+    var g = audioCtx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.linearRampToValueAtTime(0, t + len);
+    o.connect(g); g.connect(masterGain);
+    o.start(t); o.stop(t + len + 0.01);
+  }
+  function playUiMove() { playUiTone(520, 580, 0.035, 0.07); }
+  function playUiSelect() { playUiTone(700, 1050, 0.06, 0.12); }
 
   function playBossDeath() {
     if (!audioCtx || sfxMuted) return;
@@ -601,87 +637,112 @@
 
   window.addEventListener('keydown', function (e) {
     ensureAudio();
+    lastInput = 'key';
     keys[e.code] = true;
-    // snapshot the state up front: a branch below may transition (e.g. mode
-    // select -> class select), and standalone if-blocks further down must not
-    // then also fire for the same key (a number key would skip class select)
-    var stateAtStart = game.gameState;
-    if (game.gameState === 'nameentry') {
-      if (e.code === 'Escape') {
-        game.gameState = 'title';
-        blurNameInput();
-      } else if (document.activeElement !== nameInput) {
+    var s = game.gameState, c = e.code;
+    if (s === 'nameentry') {
+      if (c === 'Escape') goBack();
+      else if (c === 'Enter' || c === 'NumpadEnter') confirmName();
+      else if (document.activeElement !== nameInput) {
         // fallback for when the hidden input isn't handling keys; when it IS
         // focused, its 'input' event is the single source of truth (no dupes)
-        if (/^Key[A-Z]$/.test(e.code) && nameDraft.length < 3) {
-          nameDraft += e.code.slice(3);
-        } else if (e.code === 'Backspace') {
+        if (/^Key[A-Z]$/.test(c) && nameDraft.length < 3) {
+          nameDraft += c.slice(3);
+        } else if (c === 'Backspace') {
           nameDraft = nameDraft.slice(0, -1);
           e.preventDefault();
         }
       }
-    } else if (game.gameState === 'login') {
-      if (e.code === 'Escape') {
-        game.gameState = 'account';
-        blurHiddenInput(loginInput);
-      } else if (document.activeElement !== loginInput) {
+    } else if (s === 'login') {
+      if (c === 'Escape') goBack();
+      else if (c === 'Enter' || c === 'NumpadEnter') tryLoginSubmit();
+      else if (document.activeElement !== loginInput) {
         // fallback physical-key entry when the hidden input isn't capturing keys;
         // when it IS focused, its 'input' event is the single source of truth
         var pos = loginForm.buf.length;
-        if (/^Key[A-Z]$/.test(e.code)) {
-          var letter = e.code.slice(3);
+        if (/^Key[A-Z]$/.test(c)) {
+          var letter = c.slice(3);
           if (pos < 3 || (pos >= 7 && pos < 15)) loginForm.buf += letter;
-        } else if (/^(Digit|Numpad)[0-9]$/.test(e.code)) {
-          var digit = e.code.slice(-1);
+        } else if (/^(Digit|Numpad)[0-9]$/.test(c)) {
+          var digit = c.slice(-1);
           if ((pos >= 3 && pos < 7) || (pos >= 7 && pos < 15)) loginForm.buf += digit;
-        } else if (e.code === 'Backspace') {
+        } else if (c === 'Backspace') {
           loginForm.buf = loginForm.buf.slice(0, -1);
           loginForm.state = 'idle';
           e.preventDefault();
         }
       }
-    } else if (game.gameState === 'account') {
-      if (e.code === 'Digit1') { enterNameEntry('title'); }
-      else if (e.code === 'Digit2') { enterLogin(); }
-      else if (e.code === 'Escape') { game.gameState = 'title'; }
-    } else if (game.gameState === 'codex') {
-      if (e.code === 'Escape' || e.code === 'KeyR') game.gameState = 'title';
-    } else if (game.gameState === 'feedback') {
-      if (e.code === 'Escape') { game.gameState = 'title'; maybeRefreshLeaderboard(); }
-    } else if (game.gameState === 'title') {
-      if (e.code === 'KeyN') { game.gameState = 'account'; }
-      else if (e.code === 'KeyT') { game.gameState = 'settings'; }
-      else if (e.code === 'KeyR') { game.gameState = 'codex'; }
-      else if (e.code === 'KeyS') { game.gameState = 'shop'; }
-    } else if (game.gameState === 'shop') {
-      var si = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4 };
-      if (e.code in si) tryBuyShopItem(si[e.code]);
-      if (e.code === 'Escape' || e.code === 'KeyS') game.gameState = 'title';
-    } else if (game.gameState === 'wardrobe') {
-      if (e.code === 'Escape') game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title';
-      else if (e.code === 'ArrowLeft') { wardrobeClass = prevClassId(wardrobeClass); wardrobeScroll = 0; skinPending = null; }
-      else if (e.code === 'ArrowRight') { wardrobeClass = nextClassId(wardrobeClass); wardrobeScroll = 0; skinPending = null; }
-    } else if (game.gameState === 'settings') {
-      if (e.code === 'Escape' || e.code === 'KeyT') game.gameState = 'title';
-      else if (e.code === 'KeyN') game.gameState = 'account';
+    } else if (s === 'levelup' || s === 'ascend') {
+      if (!e.repeat) draftKey(c);
+    } else if (s === 'playing') {
+      if (c === 'Space') castAbility();
+      else if (c === 'KeyP' || c === 'Escape') game.gameState = 'paused';
+    } else if (s === 'paused') {
+      if (c === 'KeyP' || c === 'Escape') game.gameState = 'playing';
+      else menuKey(c, e);
+    } else if (UI_NAV_STATES[s]) {
+      menuKey(c, e);
     }
-    if (e.code === 'KeyM' && game.gameState !== 'nameentry' && game.gameState !== 'login') toggleMute();
-    if (e.code === 'KeyF' && game.gameState !== 'nameentry' && game.gameState !== 'login') toggleSfx();
-    if (e.code === 'Enter') handleConfirm();
-    if (e.code === 'Space' && game.gameState === 'playing') castAbility();
-    if (e.code === 'KeyP' || e.code === 'Escape') {
-      if (game.gameState === 'playing') game.gameState = 'paused';
-      else if (game.gameState === 'paused') game.gameState = 'playing';
-    }
-    if (stateAtStart === 'classselect' && game.gameState === 'classselect') {
-      var classKeys = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3, Numpad5: 4 };
-      if (e.code in classKeys) selectClassByIndex(classKeys[e.code]);
+    if (s !== 'nameentry' && s !== 'login') {
+      if (c === 'KeyM') toggleMute();
+      else if (c === 'KeyF') toggleSfx();
     }
     // Prevent arrow keys / space scrolling the page.
-    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].indexOf(e.code) !== -1) {
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].indexOf(c) !== -1) {
       e.preventDefault();
     }
   });
+
+  // Arrow keys / WASD move menu focus, Enter or Space activates, Esc goes
+  // back; plus a few per-screen shortcuts.
+  function menuKey(c, e) {
+    var s = game.gameState;
+    if (c === 'ArrowUp' || c === 'KeyW') uiNav(0, -1);
+    else if (c === 'ArrowDown' || c === 'KeyS') uiNav(0, 1);
+    else if (c === 'ArrowLeft' || c === 'KeyA') uiNav(-1, 0);
+    else if (c === 'ArrowRight' || c === 'KeyD') uiNav(1, 0);
+    else if (c === 'Enter' || c === 'NumpadEnter' || c === 'Space') { if (!e.repeat) uiActivate(); }
+    else if (c === 'Escape' || c === 'Backspace') {
+      if (s === 'gameover') { if (!(game.overLock > 0)) leaveGameOver(false); }
+      else if (BACK_STATES[s]) goBack();
+    }
+    var digit = /^(Digit|Numpad)([1-9])$/.exec(c);
+    var n = digit ? parseInt(digit[2], 10) - 1 : -1;
+    if (s === 'title') {
+      if (c === 'KeyR') game.gameState = 'codex';
+      else if (c === 'KeyT') game.gameState = 'settings';
+      else if (c === 'KeyN') openAccount('title');
+    } else if (s === 'settings') {
+      if (c === 'KeyN') openAccount('settings');
+    } else if (s === 'account') {
+      if (n === 0) enterNameEntry('title');
+      else if (n === 1) enterLogin();
+    } else if (s === 'shop') {
+      if (n >= 0 && n < SHOP_ITEMS.length) tryBuyShopItem(n);
+    } else if (s === 'classselect') {
+      if (n >= 0 && n < CLASSES.length) selectClassByIndex(n);
+    } else if (s === 'wardrobe') {
+      if (c === 'KeyQ') { wardrobeClass = prevClassId(wardrobeClass); skinPending = null; }
+      else if (c === 'KeyE') { wardrobeClass = nextClassId(wardrobeClass); skinPending = null; }
+    }
+  }
+
+  // Level-up / ascendancy drafts: number keys pick directly, arrows browse,
+  // Enter takes the focused card. (Space is deliberately NOT a pick key —
+  // players mash it for their ability right as a draft pops up.)
+  function draftKey(c) {
+    var n = game.cards.length;
+    if (!n) return;
+    var digit = /^(Digit|Numpad)([1-9])$/.exec(c);
+    if (digit) {
+      var i = parseInt(digit[2], 10) - 1;
+      if (i < n) pickDraftCard(i);
+      return;
+    }
+    if (c === 'ArrowLeft' || c === 'KeyA') game.cardFocus = (game.cardFocus + n - 1) % n;
+    else if (c === 'ArrowRight' || c === 'KeyD') game.cardFocus = (game.cardFocus + 1) % n;
+    else if (c === 'Enter' || c === 'NumpadEnter') pickDraftCard(game.cardFocus);
+  }
   window.addEventListener('keyup', function (e) { keys[e.code] = false; });
 
   function toGameCoords(clientX, clientY) {
@@ -694,6 +755,12 @@
   canvas.addEventListener('mousemove', function (e) {
     var p = toGameCoords(e.clientX, e.clientY);
     mouse.x = p.x; mouse.y = p.y;
+    lastInput = 'mouse';
+    uiHoverAt(p);
+    if (game.gameState === 'levelup' || game.gameState === 'ascend') {
+      var ci = draftCardAt(p.x, p.y);
+      if (ci >= 0) game.cardFocus = ci;
+    }
   });
 
   canvas.addEventListener('mousedown', ensureAudio);
@@ -704,6 +771,7 @@
   canvas.addEventListener('touchstart', function (e) {
     e.preventDefault();
     ensureAudio();
+    lastInput = 'touch';
     if (touchCtl.active) return;
     var t = e.changedTouches[0];
     var p = toGameCoords(t.clientX, t.clientY);
@@ -757,59 +825,20 @@
   });
 
   function handlePointerAt(p) {
-    // shared back button (top-left) on every menu screen
-    if (BACK_STATES[game.gameState] &&
-        p.x >= BACK_BTN.x && p.x <= BACK_BTN.x + BACK_BTN.w &&
-        p.y >= BACK_BTN.y && p.y <= BACK_BTN.y + BACK_BTN.h) {
-      goBack();
-      return;
-    }
-    if (game.gameState === 'title') {
-      // glowing SHOP icon
-      if ((p.x - SHOP_ICON.cx) * (p.x - SHOP_ICON.cx) + (p.y - SHOP_ICON.cy) * (p.y - SHOP_ICON.cy) <= (SHOP_ICON.r + 5) * (SHOP_ICON.r + 5)) {
-        openWardrobe('title');
+    var s = game.gameState;
+    // menu buttons registered by the screen drawn last frame
+    if (uiButtonsState === s) {
+      var hit = uiHit(p);
+      if (hit && !hit.b.disabled) {
+        if (hit.b.nav !== false) uiFocus = hit.i;
+        if (hit.b.onClick) { playUiSelect(); hit.b.onClick(); }
         return;
       }
-      var btns = titleButtons();
-      for (var bi = 0; bi < btns.length; bi++) {
-        var b = btns[bi];
-        if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) {
-          titleButtonAction(b.id);
-          return;
-        }
-      }
-    } else if (game.gameState === 'gameover' || game.gameState === 'nameentry' ||
-               game.gameState === 'accountinfo' || game.gameState === 'login') {
-      handleConfirm();
-    } else if (game.gameState === 'settings') {
-      var sbtns = settingsButtons();
-      for (var sb = 0; sb < sbtns.length; sb++) {
-        var sbtn = sbtns[sb];
-        if (p.x >= sbtn.x && p.x <= sbtn.x + sbtn.w && p.y >= sbtn.y && p.y <= sbtn.y + sbtn.h) {
-          if (sbtn.id === 'name') game.gameState = 'account';
-          else if (sbtn.id === 'music') toggleMute();
-          else if (sbtn.id === 'sfx') toggleSfx();
-          return;
-        }
-      }
-      game.gameState = 'title';
-    } else if (game.gameState === 'account') {
-      for (var ab = 0; ab < ACCOUNT_BTNS.length; ab++) {
-        var abtn = ACCOUNT_BTNS[ab];
-        if (p.x >= abtn.x && p.x <= abtn.x + abtn.w && p.y >= abtn.y && p.y <= abtn.y + abtn.h) {
-          if (abtn.id === 'newacct') { enterNameEntry('title'); }
-          else { enterLogin(); }
-          return;
-        }
-      }
-      game.gameState = 'title';
-    } else if (game.gameState === 'levelup') {
-      tryPickCard(p.x, p.y);
-    } else if (game.gameState === 'ascend') {
-      tryPickAscend(p.x, p.y);
-    } else if (game.gameState === 'classselect') {
-      tryPickClass(p.x, p.y);
-    } else if (game.gameState === 'playing') {
+    }
+    if (s === 'levelup' || s === 'ascend') {
+      var ci = draftCardAt(p.x, p.y);
+      if (ci >= 0) pickDraftCard(ci);
+    } else if (s === 'playing') {
       if (overAbilityBtn(p)) { castAbility(); return; }
       // pause button hit-box (top-right, under the score column)
       if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 32 && p.y <= 52) {
@@ -817,53 +846,20 @@
       } else if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 54 && p.y <= 74) {
         toggleAllSound();
       }
-    } else if (game.gameState === 'paused') {
-      if (p.x >= W - 24 && p.x <= W - 4 && p.y >= 54 && p.y <= 74) toggleAllSound();
-      else game.gameState = 'playing';
-    } else if (game.gameState === 'shop') {
-      var acted = false;
-      for (var sr = 0; sr < SHOP_ITEMS.length; sr++) {
-        var rr = shopRowRect(sr), ur = shopUpgradeRect(sr);
-        if (p.x >= ur.x && p.x <= ur.x + ur.w && p.y >= ur.y && p.y <= ur.y + ur.h) {
-          tryBuyShopItem(sr); acted = true; break;   // right button = upgrade
-        }
-        if (p.x >= rr.x && p.x <= rr.x + rr.w && p.y >= rr.y && p.y <= rr.y + rr.h) {
-          toggleTomeEquip(sr); acted = true; break;  // rest of row = equip toggle
-        }
-      }
-      if (!acted && p.y > 230) game.gameState = 'title';
-    } else if (game.gameState === 'wardrobe') {
-      // character selector tabs
-      var tabW = 108, gap = 6, total = CLASSES.length * tabW + (CLASSES.length - 1) * gap;
-      var tx0 = (W - total) / 2, tHit = false;
-      for (var wc = 0; wc < CLASSES.length; wc++) {
-        var tx = tx0 + wc * (tabW + gap);
-        if (p.x >= tx && p.x <= tx + tabW && p.y >= 44 && p.y <= 64) {
-          wardrobeClass = CLASSES[wc].id; wardrobeScroll = 0; skinPending = null; tHit = true; break;
-        }
-      }
-      if (!tHit) {
-        var slist = SKINS[wardrobeClass] || [], sHit = false;
-        for (var sk = 0; sk < slist.length; sk++) {
-          var scr = skinCardRect(sk);
-          if (p.x >= scr.x && p.x <= scr.x + scr.w && p.y >= scr.y && p.y <= scr.y + scr.h) {
-            selectSkin(wardrobeClass, slist[sk].id); sHit = true; break;
-          }
-        }
-        if (!sHit && p.y > 244) game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title';
-      }
-    } else if (game.gameState === 'codex') {
-      game.gameState = 'title';
-    } else if (game.gameState === 'feedback') {
-      for (var fb = 0; fb < FEEDBACK_BTNS.length; fb++) {
-        var fbtn = FEEDBACK_BTNS[fb];
-        if (p.x >= fbtn.x && p.x <= fbtn.x + fbtn.w && p.y >= fbtn.y && p.y <= fbtn.y + fbtn.h) {
-          if (fbtn.id === 'rate') window.open(ITCH_URL, '_blank');
-          game.gameState = 'title';
-          maybeRefreshLeaderboard();
-          return;
-        }
-      }
+    } else if (s === 'paused') {
+      // tapping the dimmed arena outside the pause card resumes
+      var pp = PAUSE_PANEL;
+      if (p.x < pp.x || p.x > pp.x + pp.w || p.y < pp.y || p.y > pp.y + pp.h) game.gameState = 'playing';
+    } else if (s === 'nameentry') {
+      focusNameInput();          // re-raise the mobile keyboard
+    } else if (s === 'login') {
+      focusHiddenInput(loginInput, loginForm.buf);
+    } else if (s === 'accountinfo') {
+      finishAccountInfo();
+    } else if (s === 'classselect') {
+      classUnlockPending = null; // clicking empty space cancels an armed purchase
+    } else if (s === 'wardrobe') {
+      skinPending = null;
     }
   }
 
@@ -891,46 +887,26 @@
     else game.gameState = 'title';
   }
 
-  function handleConfirm() {
-    if (game.gameState === 'shop' ||
-        game.gameState === 'account' || game.gameState === 'codex' ||
-        game.gameState === 'settings') {
-      game.gameState = 'title';
-      return;
-    }
-    if (game.gameState === 'feedback') {
-      window.open(ITCH_URL, '_blank');
-      game.gameState = 'title';
-      maybeRefreshLeaderboard();
-      return;
-    }
-    if (game.gameState === 'title') {
-      startRunGate();
-    } else if (game.gameState === 'nameentry') {
-      if (nameDraft.length === 3) {
-        runData.name = nameDraft;
-        // a fresh name means a fresh account
-        runData.playerDisc = '';
-        runData.playerSecret = '';
-        runData.playerId = '';
-        saveRunData();
-        game.gameState = 'accountinfo';
-        registerAccount(false);
-      }
-    } else if (game.gameState === 'accountinfo') {
-      if (account.state === 'created' || account.state === 'error') finishNameStep();
-    } else if (game.gameState === 'login') {
-      if (loginForm.buf.length === 15 && loginForm.state !== 'checking') submitLogin();
-    } else if (game.gameState === 'gameover') {
-      if (!runData.seenFeedbackPrompt && runData.totalRuns >= 1) {
-        runData.seenFeedbackPrompt = true;
-        saveRunData();
-        game.gameState = 'feedback';
-      } else {
-        game.gameState = 'title';
-        maybeRefreshLeaderboard();
-      }
-    }
+  // name entry: lock in the initials and claim a fresh account
+  function confirmName() {
+    if (nameDraft.length !== 3) return;
+    runData.name = nameDraft;
+    // a fresh name means a fresh account
+    runData.playerDisc = '';
+    runData.playerSecret = '';
+    runData.playerId = '';
+    saveRunData();
+    blurNameInput();
+    game.gameState = 'accountinfo';
+    registerAccount(false);
+  }
+
+  function finishAccountInfo() {
+    if (account.state === 'created' || account.state === 'error') finishNameStep();
+  }
+
+  function tryLoginSubmit() {
+    if (loginForm.buf.length === 15 && loginForm.state !== 'checking') submitLogin();
   }
 
   // ---------------------------------------------------------------------------
@@ -1097,7 +1073,10 @@
     var lvl = runData.shop[item.id] || 0;
     if (lvl >= 5) return;
     var price = SHOP_PRICES[lvl];
-    if (runData.coins < price) return;
+    if (runData.coins < price) {
+      game.toasts.push({ txt: 'NEED ' + price + 'c - HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
+      return;
+    }
     runData.coins -= price;
     runData.shop[item.id] = lvl + 1;
     // first level bought auto-equips it if there's a free slot (nice default)
@@ -1731,11 +1710,11 @@
 
   function enterClassSelect() {
     classUnlockPending = null;
-    var cardW = 84, cardH = 140, gap = 6; // narrow enough to fit 5 across 480
+    var cardW = 84, cardH = 126, gap = 6; // narrow enough to fit 5 across 480
     var totalW = CLASSES.length * cardW + (CLASSES.length - 1) * gap;
-    var startX = (W - totalW) / 2;
+    var startX = Math.round((W - totalW) / 2);
     classCards = CLASSES.map(function (c, i) {
-      return { cls: c, x: startX + i * (cardW + gap), y: 135 - cardH / 2, w: cardW, h: cardH };
+      return { cls: c, x: startX + i * (cardW + gap), y: 46, w: cardW, h: cardH };
     });
     game.gameState = 'classselect';
   }
@@ -1766,25 +1745,6 @@
     } else {
       game.toasts.push({ txt: 'NEED ' + cls.price + 'c — HAVE ' + Math.round(runData.coins) + 'c', t: 0 });
     }
-  }
-
-  var CLASS_COSM_BTN = { x: (W - 120) / 2, y: 216, w: 120, h: 20 }; // centred below the cards
-
-  function tryPickClass(mx, my) {
-    // cosmetics shop (back is the shared top-left button)
-    if (mx >= CLASS_COSM_BTN.x && mx <= CLASS_COSM_BTN.x + CLASS_COSM_BTN.w &&
-        my >= CLASS_COSM_BTN.y && my <= CLASS_COSM_BTN.y + CLASS_COSM_BTN.h) {
-      openWardrobe('classselect', currentClass);
-      return;
-    }
-    for (var i = 0; i < classCards.length; i++) {
-      var c = classCards[i];
-      if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) {
-        selectClassByIndex(i);
-        return;
-      }
-    }
-    classUnlockPending = null; // clicking empty space cancels an armed purchase
   }
 
   // ---------------------------------------------------------------------------
@@ -1906,7 +1866,7 @@
     advanceAfterLevel: false, // after a forced boss level-up, start next wave
     damageFlash: 0,
     shakeTimer: 0,
-    whiteFlash: 0,        // frames of full-screen white flash (boss death)
+    whiteFlash: 0,        // seconds of full-screen white flash (boss death)
     time: 0,              // running game time in seconds
     enemyUid: 0,          // unique id source for enemies
     scanlineOffset: 0,
@@ -2033,6 +1993,8 @@
     game.time = 0;
     game.enemyUid = 0;
     game.advanceAfterLevel = false;
+    game.pendingLevelUps = 0;
+    game.draftLock = 0;
     game.newRecord = false;
     game.enemyShots = [];
     game.waveBanner = 0;
@@ -2408,12 +2370,20 @@
     while (game.xp >= xpForNext()) {
       game.xp -= xpForNext();
       game.level++;
+      // queue every level gained: one burst of XP can cross several levels,
+      // and each one deserves its own draft (they used to overwrite each other)
+      game.pendingLevelUps = (game.pendingLevelUps || 0) + 1;
+    }
+    if (game.pendingLevelUps > 0 && game.gameState === 'playing') {
+      game.pendingLevelUps--;
       triggerLevelUp();
     }
   }
 
   function triggerLevelUp() {
     game.gameState = 'levelup';
+    game.draftLock = DRAFT_LOCK;
+    game.cardFocus = 0;
     playLevelUp();
     var taken = game.player.upgradesTaken;
     // an unlocked evolution is always offered (first card)
@@ -2537,21 +2507,37 @@
     game.spawnHaste = Math.min(game.spawnHaste, 3);
   }
 
-  function tryPickCard(mx, my) {
+  // index of the draft card under a point, or -1
+  function draftCardAt(mx, my) {
     for (var i = 0; i < game.cards.length; i++) {
       var c = game.cards[i];
-      if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) {
-        applyUpgrade(c.upgrade);
-        game.cards = [];
-        if (game.advanceAfterLevel) {
-          // a forced boss-kill level-up: proceed to the next wave intro
-          game.advanceAfterLevel = false;
-          beginWave(game.wave + 1);
-        } else {
-          game.gameState = 'playing';
-        }
-        return;
-      }
+      if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) return i;
+    }
+    return -1;
+  }
+
+  // shared by clicks, taps, number keys and Enter, for both draft screens
+  function pickDraftCard(i) {
+    if ((game.draftLock || 0) > 0 || !game.cards[i]) return;
+    if (game.gameState === 'levelup') pickCard(i);
+    else if (game.gameState === 'ascend') pickAscend(i);
+  }
+
+  function pickCard(i) {
+    applyUpgrade(game.cards[i].upgrade);
+    game.cards = [];
+    // more levels banked from the same XP burst: draft again right away
+    if (game.pendingLevelUps > 0) {
+      game.pendingLevelUps--;
+      triggerLevelUp();
+      return;
+    }
+    if (game.advanceAfterLevel) {
+      // a forced boss-kill level-up: proceed to the next wave intro
+      game.advanceAfterLevel = false;
+      beginWave(game.wave + 1);
+    } else {
+      game.gameState = 'playing';
     }
   }
 
@@ -2560,6 +2546,8 @@
   // ---------------------------------------------------------------------------
   function triggerAscend() {
     game.gameState = 'ascend';
+    game.draftLock = DRAFT_LOCK;
+    game.cardFocus = 0;
     playLevelUp();
     var pair = ASCENDANCIES[currentClass] || ASCENDANCIES.warrior;
     var cardW = 150, cardH = 180, gap = 28;
@@ -2571,17 +2559,11 @@
     });
   }
 
-  function tryPickAscend(mx, my) {
-    for (var i = 0; i < game.cards.length; i++) {
-      var c = game.cards[i];
-      if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) {
-        applyAscendancy(c.asc);
-        game.cards = [];
-        game.advanceAfterLevel = false;
-        beginWave(game.wave + 1);
-        return;
-      }
-    }
+  function pickAscend(i) {
+    applyAscendancy(game.cards[i].asc);
+    game.cards = [];
+    game.advanceAfterLevel = false;
+    beginWave(game.wave + 1);
   }
 
   function applyAscendancy(a) {
@@ -2753,9 +2735,11 @@
     if (game.blinkTimer >= 0.5) { game.blinkTimer = 0; game.blinkOn = !game.blinkOn; }
     if (game.damageFlash > 0) game.damageFlash -= dt;
     if (game.shakeTimer > 0) game.shakeTimer -= dt;
-    if (game.whiteFlash > 0) game.whiteFlash -= 1;
+    if (game.whiteFlash > 0) game.whiteFlash -= dt;
     if (game.waveBanner > 0) game.waveBanner -= dt;
     if (game.endlessBanner > 0) game.endlessBanner -= dt;
+    if (game.draftLock > 0) game.draftLock -= dt;
+    if (game.overLock > 0) game.overLock -= dt;
     for (var ti = game.toasts.length - 1; ti >= 0; ti--) {
       game.toasts[ti].t += dt;
       if (game.toasts[ti].t >= 3) game.toasts.splice(ti, 1);
@@ -2772,6 +2756,13 @@
     }
 
     if (game.gameState !== 'playing') return;
+
+    // a level banked while a screen was up (wave intro, another draft)
+    if (game.pendingLevelUps > 0) {
+      game.pendingLevelUps--;
+      triggerLevelUp();
+      return;
+    }
 
     // run time only advances during actual play (not menus or pause)
     game.time += dt;
@@ -3547,7 +3538,7 @@
       game.freezeTimer = 2.5;
       spawnFloatText(p.x, p.y, 'TIME FREEZE!', '#8fd8ff');
     } else if (pk.type === 'bomb') {
-      game.whiteFlash = 3;
+      game.whiteFlash = 0.05;
       game.shakeTimer = 0.4;
       for (var i = game.enemies.length - 1; i >= 0; i--) {
         var e = game.enemies[i];
@@ -3571,7 +3562,7 @@
     if (en.name) spawnFloatText(en.x, en.y - 22, en.name + ' SLAIN', en.color);
     playBossDeath();
     game.coinsEarned += 25 * (1 + 0.25 * tomeLevel('frt')) * game.player.coinMult;
-    game.whiteFlash = 3;          // flash white for 3 frames
+    game.whiteFlash = 0.05;       // flash white for ~3 frames at 60Hz
     game.shakeTimer = 0.5;
     game.hitStop = 0.2;           // dramatic freeze-frame
     game.score++;
@@ -3630,6 +3621,7 @@
   function endRun() {
     if (game.gameState === 'gameover') return;
     game.gameState = 'gameover';
+    game.overLock = 0.8;
     game.newRecord = false;
     if (game.wave > runData.bestWave) { runData.bestWave = game.wave; game.newRecord = true; }
     if (game.score > runData.bestKills) { runData.bestKills = game.score; game.newRecord = true; }
@@ -3647,7 +3639,7 @@
   // RENDER HELPERS
   // ---------------------------------------------------------------------------
   function text(str, x, y, size, color, align) {
-    ctx.font = size + 'px "Press Start 2P"';
+    ctx.font = size + 'px "Press Start 2P", monospace';
     ctx.textAlign = align || 'left';
     ctx.textBaseline = 'top';
     // 1px black shadow
@@ -4427,7 +4419,7 @@
   function renderWorld() {
     ctx.save();
     // screen shake
-    if (game.shakeTimer > 0) {
+    if (game.shakeTimer > 0 && prefs.shake) {
       ctx.translate(randInt(-3, 3), randInt(-3, 3));
     }
     drawBackground();
@@ -4535,17 +4527,21 @@
   function renderHUD() {
     var p = game.player;
 
-    // ----- top-left: slim HP segments, no label — red bar says it all -----
+    // ----- top-left: HP segments with the exact number underneath -----
     var segs = 20, segW = 8, segH = 5, gap = 1;
     var hpRatio = clamp(p.hp / p.maxHp, 0, 1);
-    var filled = Math.round(segs * hpRatio);
+    var filled = Math.ceil(segs * hpRatio);
+    // low health: the bar pulses so you notice without looking at it
+    var lowHp = hpRatio < 0.3;
+    var hpCol = lowHp && game.blinkOn ? '#ff8a8a' : '#ff2d2d';
     for (var i = 0; i < segs; i++) {
       var sx = 6 + i * (segW + gap);
       ctx.fillStyle = '#000';
       ctx.fillRect(sx + 1, 9, segW, segH);
-      ctx.fillStyle = i < filled ? '#ff2d2d' : '#3a3a3a';
+      ctx.fillStyle = i < filled ? hpCol : '#3a3a3a';
       ctx.fillRect(sx, 8, segW, segH);
     }
+    text(Math.max(0, Math.ceil(p.hp)) + '/' + Math.round(p.maxHp), 6, 17, 6, lowHp ? '#ff8a8a' : '#d8d8e0');
 
     // ----- top-centre: wave + banners (unchanged) -----
     text('WAVE ' + pad(game.wave, 2), W / 2, 6, 12, '#ffe600', 'center');
@@ -4656,7 +4652,8 @@
     }
 
     // ----- level, one quiet line below the spell button -----
-    text('LVL ' + pad(game.level, 2), 6, H - 16, 6, '#bbbbbb');
+    text('LV', 6, H - 16, 6, '#9a98b8');
+    text(pad(game.level, 2), 20, H - 16, 6, '#5fe6ff');
 
     // ----- thin XP bar -----
     var barX = 6, barY = H - 9, barW = W - 12, barH = 3;
@@ -4685,6 +4682,7 @@
   // SCANLINES
   // ---------------------------------------------------------------------------
   function drawScanlines() {
+    if (!prefs.scanlines) return;
     ctx.strokeStyle = 'rgba(0,0,0,0.08)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -4696,6 +4694,7 @@
   }
 
   function drawAnimatedScanlines(opacity) {
+    if (!prefs.scanlines) return;
     ctx.strokeStyle = 'rgba(255,255,255,' + opacity + ')';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -4707,12 +4706,376 @@
   }
 
   // ---------------------------------------------------------------------------
-  // SCREENS
+  // UI KIT — the shared look of every menu
   // ---------------------------------------------------------------------------
-  // ----- main menu: dungeon backdrop with wandering critters -----
+  // Palette, panels, buttons, key-hint chips and pixel icons. Menus are drawn
+  // immediate-mode: each screen registers its buttons while drawing them, and
+  // clicks, taps, arrow keys and Enter all resolve against exactly what was
+  // drawn last frame, so a hit-box can never drift away from its visuals.
+  var UI = {
+    panel: '#0e0e1b', panel2: '#16162a', panelHi: '#1f1f38',
+    line: '#2b2b48', lineHi: '#45457a',
+    gold: '#FFD700', goldDim: '#9a7d12', goldFill: '#1d1806', goldFillHi: '#2e2508',
+    text: '#f2efe6', muted: '#aaa8c4', dim: '#6f6d8d',
+    red: '#ff5c5c', green: '#4be08a', cyan: '#5fe6ff', pink: '#ff5bd8', purple: '#b98cff'
+  };
+  // readable text tints for the class colours (the raw ones are too dark on navy)
+  var CLASS_TEXT = { warrior: '#ff6b6b', rogue: '#5fe38f', mage: '#b78cff', ranger: '#e2b65a', bombardier: '#ffa64d' };
+  function classTextColor(id) { return CLASS_TEXT[id] || UI.text; }
+
+  var CLASS_DESC = {
+    warrior: 'SWINGS HEAVY AXES. HUGE HEALTH POOL, SLOW ON HIS FEET.',
+    rogue: 'THROWS DAGGERS AT A FURIOUS RATE. FASTEST, BUT FRAGILE.',
+    mage: 'ARCANE BOLTS PIERCE A FOE AND CURVE TOWARD TARGETS.',
+    ranger: 'LONG, FAST ARROWS PIERCE TWO FOES. HITS HARD, DIES FAST.',
+    bombardier: 'LOBS BOMBS. EVERY KILL EXPLODES AND CAN CHAIN THROUGH CROWDS.'
+  };
+  var CLASS_BLURB = { warrior: 'FRONTLINE', rogue: 'HIT & RUN', mage: 'ARCANE PIERCE',
+                      ranger: 'LONG RANGE', bombardier: 'EXPLOSIONS' };
+
+  // last input device: key hints are hidden for touch players
+  var lastInput = 'mouse';
+  function showKeyHints() { return lastInput !== 'touch'; }
+
+  // display preferences (settings screen), persisted locally
+  var prefs = { shake: true, scanlines: true };
+  try {
+    var savedPrefs = JSON.parse(localStorage.getItem('kryptvault_prefs') || '{}');
+    if (savedPrefs.shake === false) prefs.shake = false;
+    if (savedPrefs.scanlines === false) prefs.scanlines = false;
+  } catch (e) {}
+  function savePrefs() {
+    try { localStorage.setItem('kryptvault_prefs', JSON.stringify(prefs)); } catch (e) {}
+  }
+
+  function fullscreenSupported() {
+    var el = document.documentElement;
+    return !!(el && (el.requestFullscreen || el.webkitRequestFullscreen));
+  }
+  function isFullscreen() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+  function toggleFullscreen() {
+    try {
+      if (isFullscreen()) {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      } else {
+        var el = document.documentElement;
+        var r = (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+        if (r && r.catch) r.catch(function () {});
+      }
+    } catch (e) {}
+  }
+
+  function copyText(str, okMsg) {
+    try {
+      navigator.clipboard.writeText(str).then(function () {
+        game.toasts.push({ txt: okMsg, t: 0 });
+      }, function () {
+        game.toasts.push({ txt: 'COPY FAILED - WRITE IT DOWN', t: 0 });
+      });
+    } catch (e) {
+      game.toasts.push({ txt: 'COPY FAILED - WRITE IT DOWN', t: 0 });
+    }
+  }
+  function canCopy() { return !!(navigator.clipboard && navigator.clipboard.writeText); }
+
+  // ----- 8x8 pixel icons ('#' = lit pixel) -----
+  var ICONS = {
+    play:     ['..#.....', '..##....', '..###...', '..####..', '..####..', '..###...', '..##....', '..#.....'],
+    vault:    ['........', '.######.', '#......#', '########', '#..##..#', '#......#', '########', '........'],
+    skins:    ['.##..##.', '###..###', '########', '.######.', '..####..', '..####..', '..####..', '........'],
+    codex:    ['.######.', '#.....##', '#.###.##', '#.....##', '#.###.##', '#.....##', '.#######', '........'],
+    settings: ['...##...', '.#.##.#.', '..####..', '###..###', '###..###', '..####..', '.#.##.#.', '...##...'],
+    account:  ['...##...', '..####..', '..####..', '...##...', '.######.', '########', '########', '........'],
+    back:     ['...#....', '..##....', '.#######', '########', '.#######', '..##....', '...#....', '........'],
+    music:    ['....##..', '....#.#.', '....#..#', '....#...', '.####...', '#####...', '.###....', '........'],
+    sfx:      ['...#....', '..##.#..', '####..#.', '####..#.', '####..#.', '..##.#..', '...#....', '........'],
+    shake:    ['........', '#.####.#', '#.#..#.#', '..#..#..', '#.#..#.#', '#.####.#', '........', '........'],
+    scan:     ['########', '........', '########', '........', '########', '........', '########', '........'],
+    full:     ['###..###', '#......#', '#......#', '........', '........', '#......#', '#......#', '###..###'],
+    retry:    ['..###.#.', '.#...##.', '#...###.', '#.......', '#......#', '.#....#.', '..####..', '........'],
+    home:     ['...##...', '..####..', '.######.', '########', '.#....#.', '.#.##.#.', '.#.##.#.', '........'],
+    trophy:   ['########', '#.####.#', '.######.', '..####..', '...##...', '...##...', '..####..', '.######.'],
+    key:      ['........', '.###....', '#...#...', '#...####', '#...#.#.', '.###..#.', '........', '........'],
+    copy:     ['####....', '#..#....', '#.#####.', '#.#...#.', '###...#.', '..#...#.', '..#####.', '........'],
+    cross:    ['#......#', '.#....#.', '..#..#..', '...##...', '...##...', '..#..#..', '.#....#.', '#......#'],
+    lock:     ['..####..', '.#....#.', '.#....#.', '########', '###..###', '###..###', '########', '........'],
+    check:    ['........', '.......#', '......##', '#....##.', '##..##..', '.####...', '..##....', '........'],
+    star:     ['...##...', '...##...', '########', '.######.', '..####..', '.##..##.', '##....##', '........'],
+    user:     ['...##...', '..####..', '..####..', '...##...', '.######.', '########', '########', '........']
+  };
+  function drawIcon(name, x, y, color, s) {
+    var rows = ICONS[name];
+    if (!rows) return;
+    s = s || 1;
+    x = Math.round(x); y = Math.round(y);
+    for (var pass = 0; pass < 2; pass++) {
+      ctx.fillStyle = pass === 0 ? 'rgba(0,0,0,0.75)' : color;
+      var o = pass === 0 ? s : 0;
+      for (var r = 0; r < rows.length; r++) {
+        var row = rows[r];
+        for (var c = 0; c < row.length; c++) {
+          if (row.charCodeAt(c) === 35) ctx.fillRect(x + c * s + o, y + r * s + o, s, s);
+        }
+      }
+    }
+  }
+
+  function measureText(str, size) {
+    ctx.font = size + 'px "Press Start 2P", monospace';
+    return ctx.measureText(str).width;
+  }
+
+  // Panel with notched (rounded-pixel) corners and a soft drop shadow.
+  function drawPanel(x, y, w, h, o) {
+    o = o || {};
+    x = Math.round(x); y = Math.round(y);
+    if (!o.flat) {
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(x + 2, y + 2, w, h);
+    }
+    ctx.fillStyle = o.border || UI.line;
+    ctx.fillRect(x + 1, y, w - 2, h);
+    ctx.fillRect(x, y + 1, w, h - 2);
+    ctx.fillStyle = o.fill || UI.panel;
+    ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
+    if (o.header) {
+      ctx.fillStyle = o.headerFill || UI.panel2;
+      ctx.fillRect(x + 1, y + 1, w - 2, o.header);
+      ctx.fillStyle = o.border || UI.line;
+      ctx.fillRect(x + 1, y + 1 + o.header, w - 2, 1);
+    }
+    if (o.accent) {
+      ctx.fillStyle = o.accent;
+      ctx.fillRect(x + 1, y + 1, w - 2, 2);
+    }
+  }
+
+  // Big title text: black outline offset + coloured drop shadow + face.
+  function drawTitleText(str, x, y, size, color, shadow, align) {
+    ctx.font = size + 'px "Press Start 2P", monospace';
+    ctx.textAlign = align || 'center';
+    ctx.textBaseline = 'top';
+    var d = Math.max(1, Math.round(size / 8));
+    ctx.fillStyle = '#000';
+    ctx.fillText(str, x + d + 1, y + d + 1);
+    ctx.fillStyle = shadow;
+    ctx.fillText(str, x + d, y + d);
+    ctx.fillStyle = color;
+    ctx.fillText(str, x, y);
+  }
+
+  function drawHeader(title, sub) {
+    drawTitleText(title, W / 2, 10, 16, UI.gold, '#6b3a00');
+    if (sub) text(sub, W / 2, 33, 6, UI.muted, 'center');
+  }
+
+  // keyboard key chip, returns its width
+  function drawKeycap(label, x, y, align) {
+    var w = Math.max(11, Math.ceil(measureText(label, 6)) + 6), h = 10;
+    var lx = Math.round(align === 'right' ? x - w : (align === 'center' ? x - w / 2 : x));
+    y = Math.round(y);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(lx, y + 1, w, h);
+    ctx.fillStyle = UI.lineHi;
+    ctx.fillRect(lx, y, w, h);
+    ctx.fillStyle = UI.panel2;
+    ctx.fillRect(lx + 1, y + 1, w - 2, h - 3);
+    text(label, lx + w / 2, y + 2, 6, UI.text, 'center');
+    return w;
+  }
+
+  // centred row of [KEY] LABEL hints along the bottom; touch players get a
+  // single plain line instead (or nothing)
+  function drawHints(items, touchText, y) {
+    y = y || H - 15;
+    if (!showKeyHints()) {
+      if (touchText) text(touchText, W / 2, y + 2, 6, UI.muted, 'center');
+      return;
+    }
+    var parts = [], total = 0;
+    for (var i = 0; i < items.length; i++) {
+      var kw = Math.max(11, Math.ceil(measureText(items[i][0], 6)) + 6);
+      var lw = Math.ceil(measureText(items[i][1], 6));
+      parts.push([kw, lw]);
+      total += kw + 4 + lw + (i ? 12 : 0);
+    }
+    var x = Math.round(W / 2 - total / 2);
+    for (var j = 0; j < items.length; j++) {
+      drawKeycap(items[j][0], x, y);
+      text(items[j][1], x + parts[j][0] + 4, y + 2, 6, UI.muted);
+      x += parts[j][0] + 4 + parts[j][1] + 12;
+    }
+  }
+
+  function drawCoinIcon(x, y) {
+    x = Math.round(x); y = Math.round(y);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x + 1, y + 1, 7, 7);
+    ctx.fillStyle = '#b8900a';
+    ctx.fillRect(x, y + 1, 7, 5);
+    ctx.fillRect(x + 1, y, 5, 7);
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(x + 1, y + 1, 5, 5);
+    ctx.fillStyle = '#fff2a8';
+    ctx.fillRect(x + 2, y + 2, 2, 2);
+  }
+  // coin icon + amount anchored at x ('left' | 'right' | 'center'); returns width
+  function drawCoinAmount(x, y, amount, align, size, color) {
+    size = size || 8;
+    var s = String(amount);
+    var w = 10 + measureText(s, size);
+    var lx = Math.round(align === 'right' ? x - w : (align === 'center' ? x - w / 2 : x));
+    drawCoinIcon(lx, y + Math.round((size - 7) / 2));
+    text(s, lx + 10, y, size, color || UI.gold);
+    return w;
+  }
+  // legacy wrappers (centred 6px coin text / the player's balance)
+  function drawCoinText(cx, y, s) { drawCoinAmount(cx, y, s, 'center', 6); }
+  function drawCoinBalance(cx, y) { drawCoinAmount(cx, y, Math.round(runData.coins), 'center', 8); }
+  // the balance chip in the top-right corner of shop-like screens
+  function drawWallet() { drawCoinAmount(W - 10, 12, Math.round(runData.coins), 'right', 8); }
+
+  // ON/OFF switch, right-aligned at xr and vertically centred on cy
+  function drawToggle(xr, cy, on) {
+    var w = 32, h = 11, x = Math.round(xr - w), y = Math.round(cy - 5);
+    ctx.fillStyle = on ? UI.green : UI.lineHi;
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = on ? '#123d24' : '#141424';
+    ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
+    if (on) {
+      ctx.fillStyle = UI.green;
+      ctx.fillRect(x + w - 9, y + 2, 7, h - 4);
+      text('ON', x + 4, y + 3, 6, UI.green);
+    } else {
+      ctx.fillStyle = UI.dim;
+      ctx.fillRect(x + 2, y + 2, 7, h - 4);
+      text('OFF', x + w - 3, y + 3, 6, UI.muted, 'right');
+    }
+  }
+
+  // ----- immediate-mode buttons with keyboard focus -----
+  var uiButtons = [];        // registered by the screen drawn last frame
+  var uiButtonsState = null; // the game state those buttons belong to
+  var uiFocus = -1;          // focused button index (-1: use the default)
+  var uiFocusState = null;
+  var uiFocusMem = {};       // per-screen remembered focus (by button id)
+  var uiWantId = null;
+  var UI_NO_FOCUS_MEMORY = { gameover: 1, paused: 1, feedback: 1, accountinfo: 1, nameentry: 1, login: 1 };
+  var pauseEndArmed = false; // END RUN needs a second press
+
+  function uiBegin() {
+    var s = game.gameState;
+    if (uiFocusState !== s) {
+      if (uiFocusState && uiButtons[uiFocus]) uiFocusMem[uiFocusState] = uiButtons[uiFocus].id;
+      uiFocus = -1;
+      uiWantId = UI_NO_FOCUS_MEMORY[s] ? null : (uiFocusMem[s] || null);
+      uiFocusState = s;
+      if (s === 'paused') pauseEndArmed = false;
+    }
+    uiButtons = [];
+    uiButtonsState = s;
+  }
+  function uiEnd() {
+    if (uiFocus >= uiButtons.length) uiFocus = -1;
+    if (uiFocus >= 0) return;
+    var i;
+    if (uiWantId) {
+      for (i = 0; i < uiButtons.length; i++) {
+        if (uiButtons[i].id === uiWantId) { uiFocus = i; uiWantId = null; return; }
+      }
+    }
+    for (i = 0; i < uiButtons.length; i++) if (uiButtons[i].isDefault) { uiFocus = i; return; }
+    for (i = 0; i < uiButtons.length; i++) {
+      if (uiButtons[i].nav !== false && uiButtons[i].id !== 'back') { uiFocus = i; return; }
+    }
+  }
+  function uiIsHot(idx, b) {
+    return uiFocus === idx || (uiFocus < 0 && !!b.isDefault);
+  }
+  function uiFocused() { return uiButtons[uiFocus] || null; }
+
+  function uiHit(p) {
+    for (var i = uiButtons.length - 1; i >= 0; i--) {
+      var b = uiButtons[i];
+      if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) return { b: b, i: i };
+    }
+    return null;
+  }
+  function uiHoverAt(p) {
+    if (uiButtonsState !== game.gameState) return;
+    var hit = uiHit(p);
+    if (hit && hit.b.nav !== false) uiFocus = hit.i;
+  }
+  // spatial navigation: jump to the nearest button in the pressed direction
+  function uiNav(dx, dy) {
+    if (uiButtonsState !== game.gameState || uiButtons.length === 0) return;
+    if (uiFocus < 0) { uiEnd(); return; }
+    var cur = uiButtons[uiFocus];
+    var cx = cur.x + cur.w / 2, cy = cur.y + cur.h / 2;
+    var best = -1, bestScore = 1e9;
+    for (var i = 0; i < uiButtons.length; i++) {
+      if (i === uiFocus) continue;
+      var b = uiButtons[i];
+      if (b.nav === false) continue;
+      var ddx = b.x + b.w / 2 - cx, ddy = b.y + b.h / 2 - cy;
+      var along = ddx * dx + ddy * dy;
+      if (along <= 1) continue;
+      var across = Math.abs(ddx * dy) + Math.abs(ddy * dx);
+      var score = along + across * 2.2;
+      if (score < bestScore) { bestScore = score; best = i; }
+    }
+    if (best >= 0) { uiFocus = best; playUiMove(); }
+  }
+  function uiActivate() {
+    if (uiButtonsState !== game.gameState) return;
+    if (uiFocus < 0) uiEnd();
+    var b = uiButtons[uiFocus];
+    if (b && !b.disabled && b.onClick) { playUiSelect(); b.onClick(); }
+  }
+
+  // b: { id, x, y, w, h, label, onClick, kind ('primary'|'danger'|normal),
+  //      icon, iconColor, size, align ('center'), right(xr, cy, hot),
+  //      disabled, isDefault, nav (false = mouse only), draw(b, hot) }
+  function uiButton(b) {
+    var idx = uiButtons.length;
+    uiButtons.push(b);
+    var hot = !b.disabled && uiIsHot(idx, b);
+    if (b.draw) { b.draw(b, hot); return hot; }
+    var kind = b.kind || 'normal';
+    var accent = kind === 'danger' ? UI.red : (b.accent || UI.gold);
+    var fill, border;
+    if (b.disabled) { fill = UI.panel; border = UI.line; }
+    else if (kind === 'primary') { fill = hot ? UI.goldFillHi : UI.goldFill; border = hot ? UI.gold : UI.goldDim; }
+    else if (kind === 'danger') { fill = hot ? '#2c1010' : UI.panel; border = hot ? UI.red : '#5a2a2a'; }
+    else { fill = hot ? UI.panelHi : (b.fill || UI.panel); border = hot ? accent : (b.border || UI.line); }
+    drawPanel(b.x, b.y, b.w, b.h, { fill: fill, border: border });
+    if (hot) {
+      ctx.fillStyle = accent;
+      ctx.fillRect(Math.round(b.x) + 1, Math.round(b.y) + 2, 2, b.h - 4);
+    }
+    var size = b.size || 8;
+    var ty = Math.round(b.y + (b.h - size) / 2);
+    var labelColor = b.disabled ? UI.dim :
+      (b.labelColor || (kind === 'primary' ? UI.gold : (kind === 'danger' ? (hot ? '#ffd6d6' : UI.red) : (hot ? '#ffffff' : UI.text))));
+    var iconColor = b.disabled ? UI.dim : (b.iconColor || (hot ? accent : UI.muted));
+    var iconW = b.icon ? 14 : 0;
+    var lx;
+    if (b.align === 'center') lx = Math.round(b.x + b.w / 2 - (measureText(b.label, size) + iconW) / 2);
+    else lx = Math.round(b.x) + 9;
+    if (b.icon) {
+      drawIcon(b.icon, lx, Math.round(b.y + (b.h - 8) / 2), iconColor);
+      lx += iconW;
+    }
+    text(b.label, lx, ty, size, labelColor);
+    if (b.right) b.right(Math.round(b.x + b.w) - 8, Math.round(b.y + b.h / 2), hot);
+    return hot;
+  }
+
+  // ----- shared dungeon backdrop for every menu -----
+  var frameDt = 1 / 60;  // set by the game loop; menu ambience moves by it
   var menuCritters = [];
   function initMenuBackdrop() {
-    if (walls.length === 0) walls = generateWalls(3);
+    if (walls.length === 0) { walls = generateWalls(3); bgDirty = true; }
     menuCritters = [];
     var tiles = [TILE.skeleton, TILE.slime, TILE.orc, TILE.heroMage, TILE.slime, TILE.skeleton];
     for (var i = 0; i < 6; i++) {
@@ -4725,70 +5088,77 @@
     }
   }
 
-  function titleButtons() {
-    return [
-      { id: 'play',     label: 'PLAY',                                          hint: 'ENTER', x: 24, y: 84,  w: 172, h: 42, big: true },
-      { id: 'shop',     label: 'THE VAULT  ' + Math.round(runData.coins) + 'c', hint: 'S', x: 24, y: 140, w: 172, h: 22 },
-      { id: 'codex',    label: 'RECIPE CODEX',                                  hint: 'R', x: 24, y: 170, w: 172, h: 22 },
-      { id: 'settings', label: 'SETTINGS',                                      hint: 'T', x: 24, y: 200, w: 172, h: 22 }
-    ];
+  // soft edge darkening, rendered once into a small buffer and stretched
+  // (a full-resolution radial gradient every frame is surprisingly costly)
+  var vignetteBuf = null;
+  function drawVignette() {
+    if (!vignetteBuf) {
+      var vb = document.createElement('canvas');
+      vb.width = W / 4; vb.height = H / 4;
+      var vctx = vb.getContext('2d');
+      var g = vctx.createRadialGradient(W / 8, H / 8, H * 0.3 / 4, W / 8, H / 8, W * 0.62 / 4);
+      if (!g || !g.addColorStop) return;
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(0,0,0,0.6)');
+      vctx.fillStyle = g;
+      vctx.fillRect(0, 0, vb.width, vb.height);
+      vignetteBuf = vb;
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(vignetteBuf, 0, 0, W, H);
+    ctx.imageSmoothingEnabled = false;
   }
 
-  // settings screen: account + audio toggles in one place
-  function settingsButtons() {
-    return [
-      { id: 'name',  label: runData.playerDisc ? 'ACCOUNT: ' + playerTag() : 'NAME: ' + (runData.name || '---'), hint: 'N', x: 140, y: 108, w: 200, h: 22 },
-      { id: 'music', label: musicMuted ? 'MUSIC: OFF' : 'MUSIC: ON', hint: 'M', x: 140, y: 138, w: 200, h: 22 },
-      { id: 'sfx',   label: sfxMuted ? 'SFX: OFF' : 'SFX: ON',       hint: 'F', x: 140, y: 168, w: 200, h: 22 }
-    ];
+  // live dungeon floor + wandering critters under a dark veil
+  function drawMenuBackdrop(veil) {
+    drawBackground();   // cached floor + walls: one blit instead of ~500 tiles
+    for (var ci = 0; ci < menuCritters.length; ci++) {
+      var cr = menuCritters[ci];
+      cr.x += cr.vx * frameDt;
+      cr.y += cr.vy * frameDt;
+      if (cr.x < 16 || cr.x > W - 16) { cr.vx *= -1; cr.flip = cr.vx < 0; }
+      if (cr.y < 16 || cr.y > H - 16) cr.vy *= -1;
+      if (!drawTile(cr.tile, Math.round(cr.x - 8), Math.round(cr.y - 8), 16, 16, cr.flip)) {
+        ctx.fillStyle = '#666677';
+        ctx.fillRect(Math.round(cr.x - 5), Math.round(cr.y - 5), 10, 10);
+      }
+    }
+    ctx.fillStyle = 'rgba(4,4,12,' + veil + ')';
+    ctx.fillRect(0, 0, W, H);
+    drawVignette();
+    drawAnimatedScanlines(0.04);
   }
 
+  // ---------------------------------------------------------------------------
+  // SCREENS
+  // ---------------------------------------------------------------------------
   function startRunGate() {
     if (runData.name && runData.name.length === 3) enterClassSelect();
     else { enterNameEntry('play'); }
   }
 
-  function titleButtonAction(id) {
-    if (id === 'play') {
-      startRunGate();
-    } else if (id === 'shop') {
-      game.gameState = 'shop';
-    } else if (id === 'codex') {
-      game.gameState = 'codex';
-    } else if (id === 'settings') {
-      game.gameState = 'settings';
-    }
-  }
-
-  // leaderboard panel geometry (also used for click handling)
-  var LB_PANEL = { x: 210, y: 80, w: 246, h: 156 };
-  var SHOP_ICON = { cx: 446, cy: 58, r: 11 }; // glowing SHOP button above the board's corner
-
-  // Shared back button, drawn top-left on every menu screen (never in gameplay).
-  var BACK_BTN = { x: 6, y: 6, w: 62, h: 16 };
-  function drawBackButton() {
-    var b = BACK_BTN;
-    var hover = mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h;
-    ctx.fillStyle = hover ? '#2a2a3e' : '#14141e';
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    ctx.strokeStyle = hover ? '#FFD700' : '#444466';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
-    text('< BACK', b.x + b.w / 2, b.y + 5, 6, hover ? '#ffffff' : '#aaaaaa', 'center');
-  }
   // Where "back" leads from each menu screen.
   function goBack() {
     var s = game.gameState;
     if (s === 'wardrobe') { game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title'; return; }
-    if (s === 'login') { game.gameState = 'account'; return; }
+    if (s === 'login') { blurHiddenInput(loginInput); game.gameState = 'account'; return; }
+    if (s === 'account') { game.gameState = accountFrom; return; }
     if (s === 'nameentry') { blurNameInput(); game.gameState = 'title'; return; }
     if (s === 'feedback') { game.gameState = 'title'; maybeRefreshLeaderboard(); return; }
     game.gameState = 'title';
   }
-  // menu states that show the shared back button (everything but title + gameplay)
-  var BACK_STATES = { shop: 1, wardrobe: 1, settings: 1, account: 1, accountinfo: 1,
-    codex: 1, login: 1, nameentry: 1, classselect: 1,
-    feedback: 1, gameover: 1 };
+  // menu states that show the shared top-left back button
+  var BACK_STATES = { shop: 1, wardrobe: 1, settings: 1, account: 1,
+    codex: 1, login: 1, nameentry: 1, classselect: 1, feedback: 1 };
+  // states driven by the UI kit's arrow/enter navigation
+  var UI_NAV_STATES = { title: 1, shop: 1, wardrobe: 1, settings: 1, account: 1, accountinfo: 1,
+    codex: 1, classselect: 1, feedback: 1, gameover: 1, paused: 1 };
+  var accountFrom = 'settings';
+  function openAccount(from) { accountFrom = from || 'settings'; game.gameState = 'account'; }
+
+  function drawBackButton() {
+    uiButton({ id: 'back', x: 6, y: 6, w: 54, h: 16, icon: 'back', label: 'BACK', size: 6, onClick: goBack });
+  }
 
   function fmtKills(k) {
     if (k >= 1000) {
@@ -4797,321 +5167,393 @@
     }
     return '' + k;
   }
+  function fmtTime(t) {
+    var mins = Math.floor(t / 60), secs = Math.floor(t % 60);
+    return mins + ':' + pad(secs, 2);
+  }
 
+  // any skin the player could buy right now? (drives the NEW badge)
+  function affordableSkinExists() {
+    for (var ci = 0; ci < CLASSES.length; ci++) {
+      var list = SKINS[CLASSES[ci].id] || [];
+      for (var i = 0; i < list.length; i++) {
+        var sk = list[i];
+        if (skinOwned(sk.id) || !sk.price) continue;
+        if (sk.tier === 'epic' && !epicUnlocked()) continue;
+        if (runData.coins >= sk.price) return true;
+      }
+    }
+    return false;
+  }
+  function skinCounts() {
+    var owned = 0, total = 0;
+    for (var ci = 0; ci < CLASSES.length; ci++) {
+      var list = SKINS[CLASSES[ci].id] || [];
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].tier === 'default') continue;
+        total++;
+        if (skinOwned(list[i].id)) owned++;
+      }
+    }
+    return { owned: owned, total: total };
+  }
+
+  // a hero (with its equipped skin) at x,y,size — used by menus and the board
+  function drawHeroIcon(classId, x, y, size) {
+    drawSkinPreview(classId, skinById(classId, equippedSkinId(classId)), x, y, size);
+  }
+
+  // ----- TITLE -----
   function renderTitle() {
-    // live dungeon backdrop: floor, walls, drifting critters, dark veil
-    drawFloor();
-    drawWalls();
-    for (var ci = 0; ci < menuCritters.length; ci++) {
-      var cr = menuCritters[ci];
-      cr.x += cr.vx * 0.016;
-      cr.y += cr.vy * 0.016;
-      if (cr.x < 16 || cr.x > W - 16) { cr.vx *= -1; cr.flip = cr.vx < 0; }
-      if (cr.y < 16 || cr.y > H - 16) cr.vy *= -1;
-      if (!drawTile(cr.tile, Math.round(cr.x - 8), Math.round(cr.y - 8), 16, 16, cr.flip)) {
-        ctx.fillStyle = '#666677';
-        ctx.fillRect(Math.round(cr.x - 5), Math.round(cr.y - 5), 10, 10);
-      }
-    }
-    ctx.fillStyle = 'rgba(0,0,8,0.74)';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
+    drawMenuBackdrop(0.7);
 
-    // title with red drop shadow
-    ctx.font = '16px "Press Start 2P"';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = '#b00';
-    ctx.fillText('KRYPTVAULT', W / 2 + 2, 22 + 2);
-    ctx.fillStyle = '#FFD700';
-    ctx.fillText('KRYPTVAULT', W / 2, 22);
-    text('ROGUELITE SURVIVAL', W / 2, 46, 8, '#ffffff', 'center');
+    drawTitleText('KRYPTVAULT', W / 2, 13, 24, UI.gold, '#a00000');
+    text('ROGUELITE  SURVIVAL', W / 2, 45, 6, '#e8d9a8', 'center');
 
-    // ----- menu buttons (left column) -----
-    var btns = titleButtons();
-    for (var i = 0; i < btns.length; i++) {
-      var b = btns[i];
-      var hover = mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h;
-      ctx.fillStyle = hover ? '#FFD700' : (b.big ? '#8a7500' : '#444466');
-      ctx.fillRect(b.x - 1, b.y - 1, b.w + 2, b.h + 2);
-      ctx.fillStyle = hover ? '#1f1a08' : '#0d0d1a';
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-      var labelColor = b.big ? '#FFD700' : (hover ? '#ffffff' : '#cccccc');
-      var size = b.big ? 8 : 6;
-      text(b.label, b.x + 8, b.y + (b.h - size) / 2, size, labelColor);
-      text(b.hint, b.x + b.w - 6, b.y + (b.h - 6) / 2, 6, '#555566', 'right');
-    }
+    // ----- left column: the main menu -----
+    var mx = 20, mw = 172;
+    uiButton({ id: 'play', x: mx, y: 62, w: mw, h: 30, kind: 'primary', icon: 'play', label: 'PLAY', size: 12,
+      isDefault: true, onClick: startRunGate,
+      right: function (xr, cy) { if (showKeyHints()) drawKeycap('ENTER', xr, cy - 5, 'right'); } });
 
-    // ----- leaderboard panel (right column) -----
-    ctx.fillStyle = '#444466';
-    ctx.fillRect(LB_PANEL.x - 1, LB_PANEL.y - 1, LB_PANEL.w + 2, LB_PANEL.h + 2);
-    ctx.fillStyle = 'rgba(8,8,18,0.92)';
-    ctx.fillRect(LB_PANEL.x, LB_PANEL.y, LB_PANEL.w, LB_PANEL.h);
-    // header
-    ctx.fillStyle = '#16162a';
-    ctx.fillRect(LB_PANEL.x, LB_PANEL.y, LB_PANEL.w, 16);
-    text('LEADERBOARD', LB_PANEL.x + 8, LB_PANEL.y + 5, 6, '#FFD700');
-    text('TOP 10', LB_PANEL.x + LB_PANEL.w - 6, LB_PANEL.y + 5, 6, '#555577', 'right');
-    // column headers
-    text('#', LB_PANEL.x + 8, LB_PANEL.y + 21, 6, '#555577');
-    text('NAME', LB_PANEL.x + 38, LB_PANEL.y + 21, 6, '#555577');
-    text('WAVE', LB_PANEL.x + 138, LB_PANEL.y + 21, 6, '#555577');
-    text('KILLS', LB_PANEL.x + LB_PANEL.w - 8, LB_PANEL.y + 21, 6, '#555577', 'right');
+    var y = 98, gap = 26, bh = 22;
+    uiButton({ id: 'shop', x: mx, y: y, w: mw, h: bh, icon: 'vault', label: 'THE VAULT',
+      onClick: function () { game.gameState = 'shop'; },
+      right: function (xr, cy) { drawCoinAmount(xr, cy - 4, Math.round(runData.coins), 'right', 8); } });
 
-    var ly = LB_PANEL.y + 34;
-    if (leaderboard.state === 'loading' || leaderboard.state === 'idle') {
-      text('LOADING...', LB_PANEL.x + LB_PANEL.w / 2, ly + 36, 6, '#777777', 'center');
-    } else if (leaderboard.state === 'error') {
-      text('LEADERBOARD OFFLINE', LB_PANEL.x + LB_PANEL.w / 2, ly + 36, 6, '#883333', 'center');
-    } else if (leaderboard.rows.length === 0) {
-      text('NO RUNS YET — BE THE FIRST', LB_PANEL.x + LB_PANEL.w / 2, ly + 36, 6, '#777777', 'center');
-    } else {
-      for (var r = 0; r < leaderboard.rows.length; r++) {
-        var row = leaderboard.rows[r];
-        var me = row.name === runData.name &&
-                 (!runData.playerDisc || !row.disc || row.disc === runData.playerDisc);
-        var tag = row.name + (row.disc ? '#' + row.disc : '');
-        var rowY = ly + r * 12; // 12px rows fill the panel with no dead strip
-        text(pad(r + 1, 2), LB_PANEL.x + 8, rowY, 6, me ? '#FFD700' : '#555566');
-        // class shown as the hero sprite (fallback: class-coloured square)
-        if (!drawTile(classDef(row.cls).tile, LB_PANEL.x + 24, rowY - 2, 9, 9, false)) {
-          ctx.fillStyle = classDef(row.cls).color;
-          ctx.fillRect(LB_PANEL.x + 25, rowY - 1, 7, 7);
+    var newSkin = affordableSkinExists();
+    uiButton({ id: 'skins', x: mx, y: y + gap, w: mw, h: bh, icon: 'skins', label: 'SKINS',
+      iconColor: chromaColor(),
+      onClick: function () { openWardrobe('title', currentClass); },
+      right: function (xr, cy) {
+        if (newSkin) {
+          var pulse = 0.55 + 0.45 * Math.sin(game.time * 5);
+          ctx.globalAlpha = pulse;
+          drawPanel(xr - 26, cy - 6, 26, 12, { fill: '#3a0d30', border: UI.pink, flat: true });
+          ctx.globalAlpha = 1;
+          text('NEW', xr - 13, cy - 3, 6, '#ffd2f3', 'center');
+        } else {
+          var sc = skinCounts();
+          text(sc.owned + '/' + sc.total, xr, cy - 3, 6, UI.dim, 'right');
         }
-        text(tag, LB_PANEL.x + 38, rowY, 6, me ? '#FFD700' : classDef(row.cls).color);
-        text(pad(row.wave, 2), LB_PANEL.x + 142, rowY, 6, me ? '#FFD700' : '#ffffff');
-        text(fmtKills(row.kills), LB_PANEL.x + LB_PANEL.w - 8, rowY, 6, me ? '#FFD700' : '#999999', 'right');
+      } });
+
+    uiButton({ id: 'codex', x: mx, y: y + gap * 2, w: mw, h: bh, icon: 'codex', label: 'RECIPE CODEX',
+      onClick: function () { game.gameState = 'codex'; } });
+    uiButton({ id: 'settings', x: mx, y: y + gap * 3, w: mw, h: bh, icon: 'settings', label: 'SETTINGS',
+      onClick: function () { game.gameState = 'settings'; } });
+
+    // ----- player card: who you are + your best, opens the account screen -----
+    uiButton({ id: 'player', x: mx, y: 206, w: mw, h: 40, onClick: function () { openAccount('title'); },
+      draw: function (b, hot) {
+        drawPanel(b.x, b.y, b.w, b.h, { fill: hot ? UI.panelHi : 'rgba(14,14,27,0.92)', border: hot ? UI.gold : UI.line });
+        if (hot) { ctx.fillStyle = UI.gold; ctx.fillRect(b.x + 1, b.y + 2, 2, b.h - 4); }
+        drawPanel(b.x + 6, b.y + 6, 28, 28, { fill: '#0a0a14', border: UI.line, flat: true });
+        drawHeroIcon(currentClass, b.x + 8, b.y + 8, 24);
+        if (runData.name) {
+          text(playerTag(), b.x + 40, b.y + 8, 8, UI.cyan);
+          if (runData.totalRuns > 0) {
+            text('BEST W' + pad(runData.bestWave, 2) + ' - ' + fmtKills(runData.bestKills) + ' KILLS', b.x + 40, b.y + 22, 6, UI.muted);
+          } else {
+            text('NO RUNS YET', b.x + 40, b.y + 22, 6, UI.muted);
+          }
+        } else {
+          text('NEW PLAYER', b.x + 40, b.y + 8, 8, UI.text);
+          text('PLAY TO CLAIM A TAG', b.x + 40, b.y + 22, 6, UI.muted);
+        }
+      } });
+
+    // ----- right column: leaderboard -----
+    drawLeaderboard(204, 62, 256, 184);
+
+    // ----- footer -----
+    text('v' + GAME_VERSION, 8, H - 13, 6, UI.dim);
+    drawHints([['WASD', 'MOVE'], ['SPACE', 'ABILITY'], ['P', 'PAUSE']], 'DRAG TO MOVE - AIM IS AUTOMATIC');
+  }
+
+  function drawLeaderboard(x, y, w, h) {
+    drawPanel(x, y, w, h, { fill: 'rgba(10,10,22,0.94)', header: 17 });
+    drawIcon('trophy', x + 8, y + 5, UI.gold);
+    text('LEADERBOARD', x + 21, y + 5, 8, UI.gold);
+    text('TOP 10', x + w - 8, y + 6, 6, UI.dim, 'right');
+    var hy = y + 24;
+    text('#', x + 9, hy, 6, UI.dim);
+    text('PLAYER', x + 46, hy, 6, UI.dim);
+    text('WAVE', x + 194, hy, 6, UI.dim, 'right');
+    text('KILLS', x + w - 9, hy, 6, UI.dim, 'right');
+
+    var ry0 = y + 37, pitch = 14;
+    var msgY = y + h / 2 + 4;
+    if (leaderboard.state === 'loading' || leaderboard.state === 'idle') {
+      var dots = '...'.slice(0, 1 + Math.floor(game.time * 3) % 3);
+      text('LOADING' + dots, x + w / 2, msgY, 8, UI.muted, 'center');
+      return;
+    }
+    if (leaderboard.state === 'error') {
+      text('LEADERBOARD OFFLINE', x + w / 2, msgY - 6, 8, UI.red, 'center');
+      text('YOUR RUNS STILL COUNT LOCALLY', x + w / 2, msgY + 8, 6, UI.dim, 'center');
+      return;
+    }
+    if (leaderboard.rows.length === 0) {
+      text('NO RUNS YET', x + w / 2, msgY - 6, 8, UI.muted, 'center');
+      text('BE THE FIRST', x + w / 2, msgY + 8, 6, UI.dim, 'center');
+      return;
+    }
+    var RANK_COL = ['#FFD700', '#d9dee8', '#d8904a'];
+    for (var r = 0; r < leaderboard.rows.length; r++) {
+      var row = leaderboard.rows[r];
+      var me = row.name === runData.name &&
+               (!runData.playerDisc || !row.disc || row.disc === runData.playerDisc);
+      var tag = row.name + (row.disc ? '#' + row.disc : '');
+      var rowY = ry0 + r * pitch;
+      if (me) {
+        ctx.fillStyle = 'rgba(255,215,0,0.13)';
+        ctx.fillRect(x + 2, rowY - 3, w - 4, pitch);
+        ctx.fillStyle = UI.gold;
+        ctx.fillRect(x + 2, rowY - 3, 2, pitch);
+      } else if (r % 2 === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.035)';
+        ctx.fillRect(x + 2, rowY - 3, w - 4, pitch);
       }
+      text(pad(r + 1, 2), x + 9, rowY, 8, me ? UI.gold : (RANK_COL[r] || UI.dim));
+      if (row.cls === 'bombardier') {
+        drawBombardierAt(x + 35, rowY + 3, 0.7, 1, '#ff8c1a');
+      } else if (!drawTile(classDef(row.cls).tile, x + 30, rowY - 2, 11, 11, false)) {
+        ctx.fillStyle = classDef(row.cls).color;
+        ctx.fillRect(x + 31, rowY - 1, 8, 8);
+      }
+      text(tag, x + 46, rowY, 8, me ? UI.gold : classTextColor(row.cls));
+      text(String(row.wave), x + 194, rowY, 8, me ? UI.gold : UI.text, 'right');
+      text(fmtKills(row.kills), x + w - 9, rowY, 8, me ? UI.gold : UI.muted, 'right');
     }
-
-    if (runData.totalRuns > 0) {
-      text('YOUR BEST  W' + pad(runData.bestWave, 2) + ' · ' + runData.bestKills + ' KILLS',
-           W / 2, 248, 6, '#00e5ff', 'center');
-    }
-    text('WASD MOVE — AUTO-FIRE — P PAUSE', W / 2, 259, 6, '#555555', 'center');
-    text('v' + GAME_VERSION, 6, 258, 6, '#555566');
-
-    // ----- glowing SHOP button (a coin bag; draws attention to cosmetics) -----
-    var si = SHOP_ICON, chp = chromaColor(), pulse = 0.5 + 0.5 * Math.sin(game.time * 4);
-    var siHover = (mouse.x - si.cx) * (mouse.x - si.cx) + (mouse.y - si.cy) * (mouse.y - si.cy) < (si.r + 5) * (si.r + 5);
-    ctx.globalAlpha = 0.22 + 0.28 * pulse;
-    ctx.fillStyle = chp;
-    ctx.beginPath(); ctx.arc(si.cx, si.cy, si.r + 4 + pulse * 3, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = siHover ? '#26263a' : '#161622';
-    ctx.beginPath(); ctx.arc(si.cx, si.cy, si.r, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = chp; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(si.cx, si.cy, si.r, 0, Math.PI * 2); ctx.stroke();
-    // coathanger (wardrobe): triangular body, bottom bar, little hook
-    var hx = si.cx, hy = si.cy + 2;
-    ctx.strokeStyle = '#f0d878';
-    ctx.lineWidth = 1.6;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.beginPath();                       // body triangle
-    ctx.moveTo(hx - 7, hy + 3);
-    ctx.lineTo(hx, hy - 2);
-    ctx.lineTo(hx + 7, hy + 3);
-    ctx.stroke();
-    ctx.beginPath();                       // bottom bar
-    ctx.moveTo(hx - 7, hy + 3);
-    ctx.lineTo(hx + 7, hy + 3);
-    ctx.stroke();
-    ctx.beginPath();                       // hook
-    ctx.moveTo(hx, hy - 2);
-    ctx.lineTo(hx, hy - 5);
-    ctx.quadraticCurveTo(hx + 3, hy - 8, hx + 1, hy - 8);
-    ctx.stroke();
-    ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
-    text('SHOP', si.cx, si.cy + si.r + 2, 6, '#FFD700', 'center');
   }
 
+  // ----- SETTINGS -----
   function renderSettings() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
-    text('SETTINGS', W / 2, 40, 16, '#FFD700', 'center');
-    text('NAME, MUSIC & SOUND EFFECTS', W / 2, 66, 6, '#888888', 'center');
-    var btns = settingsButtons();
-    for (var i = 0; i < btns.length; i++) {
-      var b = btns[i];
-      var hover = mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h;
-      ctx.fillStyle = hover ? '#FFD700' : '#444466';
-      ctx.fillRect(b.x - 1, b.y - 1, b.w + 2, b.h + 2);
-      ctx.fillStyle = hover ? '#1f1a08' : '#0d0d1a';
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-      text(b.label, b.x + 8, b.y + (b.h - 6) / 2, 6, hover ? '#ffffff' : '#cccccc');
-      text(b.hint, b.x + b.w - 6, b.y + (b.h - 6) / 2, 6, '#555566', 'right');
+    drawMenuBackdrop(0.86);
+    drawHeader('SETTINGS', 'AUDIO, DISPLAY AND ACCOUNT');
+    var x = 120, w = 240, h = 23, pitch = 27, y = 48;
+    uiButton({ id: 'account', x: x, y: y, w: w, h: h, icon: 'account', label: 'ACCOUNT',
+      onClick: function () { openAccount('settings'); },
+      right: function (xr, cy) {
+        text(runData.name ? playerTag() : 'NO NAME', xr, cy - 3, 6, runData.name ? UI.cyan : UI.dim, 'right');
+      } });
+    var toggles = [
+      { id: 'music', icon: 'music', label: 'MUSIC', on: !musicMuted, fn: toggleMute },
+      { id: 'sfx', icon: 'sfx', label: 'SOUND FX', on: !sfxMuted, fn: toggleSfx },
+      { id: 'shake', icon: 'shake', label: 'SCREEN SHAKE', on: prefs.shake,
+        fn: function () { prefs.shake = !prefs.shake; savePrefs(); } },
+      { id: 'scan', icon: 'scan', label: 'SCANLINES', on: prefs.scanlines,
+        fn: function () { prefs.scanlines = !prefs.scanlines; savePrefs(); } }
+    ];
+    if (fullscreenSupported()) {
+      toggles.push({ id: 'full', icon: 'full', label: 'FULLSCREEN', on: isFullscreen(), fn: toggleFullscreen });
     }
-    text('ESC / ENTER TO RETURN', W / 2, 220, 6, '#888888', 'center');
+    for (var i = 0; i < toggles.length; i++) {
+      (function (t, ty) {
+        uiButton({ id: t.id, x: x, y: ty, w: w, h: h, icon: t.icon, label: t.label, onClick: t.fn,
+          right: function (xr, cy) { drawToggle(xr, cy, t.on); } });
+      })(toggles[i], y + pitch * (i + 1));
+    }
+    text('KRYPTVAULT v' + GAME_VERSION + '  -  MADE BY ODDSLICE', W / 2, 224, 6, UI.dim, 'center');
+    drawHints([['ARROWS', 'SELECT'], ['ENTER', 'TOGGLE'], ['ESC', 'BACK']], 'TAP A ROW TO CHANGE IT');
   }
 
-  // account hub: shows tag + vault key, switch/new account options
-  var ACCOUNT_BTNS = [
-    { id: 'newacct', label: '1. NEW NAME / ACCOUNT', x: 140, y: 168, w: 200, h: 20 },
-    { id: 'loginpc', label: '2. LOGIN WITH VAULT KEY', x: 140, y: 194, w: 200, h: 20 }
-  ];
+  // ----- ACCOUNT -----
+  function drawVaultKeyBox(cx, y, key) {
+    var kw = 120, kh = 22, kx = Math.round(cx - kw / 2);
+    drawPanel(kx, y, kw, kh, { fill: '#0a0a14', border: UI.goldDim, flat: true });
+    text(key || '--------', cx, y + 5, 12, UI.gold, 'center');
+  }
 
   function renderAccount() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
-
-    text('YOUR ACCOUNT', W / 2, 24, 10, '#FFD700', 'center');
-
+    drawMenuBackdrop(0.86);
+    drawHeader('ACCOUNT', 'YOUR TAG AND VAULT KEY CARRY YOUR SAVE');
+    var px = 100, pw = 280, py = 48, ph = 104;
+    drawPanel(px, py, pw, ph, { fill: 'rgba(14,14,27,0.96)' });
     if (runData.playerDisc) {
-      text('PLAYING AS', W / 2, 56, 6, '#888888', 'center');
-      text(playerTag(), W / 2, 70, 16, '#00e5ff', 'center');
-      text('VAULT KEY', W / 2, 102, 6, '#888888', 'center');
-      text(runData.playerSecret, W / 2, 114, 10, '#FFD700', 'center');
-      text('USE TAG + KEY TO LOG IN ON ANY PC', W / 2, 136, 6, '#777777', 'center');
+      text('PLAYING AS', W / 2, py + 10, 6, UI.muted, 'center');
+      text(playerTag(), W / 2, py + 22, 16, UI.cyan, 'center');
+      text('VAULT KEY', W / 2, py + 48, 6, UI.muted, 'center');
+      drawVaultKeyBox(W / 2, py + 58, runData.playerSecret);
+      text('LOG IN ON ANY DEVICE WITH TAG + KEY', W / 2, py + 88, 6, UI.dim, 'center');
     } else if (runData.name) {
-      text('LOCAL NAME: ' + runData.name + ' (NO ONLINE ACCOUNT)', W / 2, 70, 6, '#bbbbbb', 'center');
-      text('AN ACCOUNT IS CREATED AUTOMATICALLY WHEN ONLINE', W / 2, 86, 6, '#777777', 'center');
+      text('LOCAL NAME', W / 2, py + 18, 6, UI.muted, 'center');
+      text(runData.name, W / 2, py + 32, 16, UI.text, 'center');
+      text('NO ONLINE ACCOUNT YET', W / 2, py + 62, 8, UI.red, 'center');
+      text('ONE IS CREATED AUTOMATICALLY WHEN ONLINE', W / 2, py + 80, 6, UI.dim, 'center');
     } else {
-      text('NO NAME SET YET', W / 2, 70, 8, '#bbbbbb', 'center');
+      text('NO NAME SET YET', W / 2, py + 40, 10, UI.text, 'center');
+      text('PICK INITIALS TO JOIN THE LEADERBOARD', W / 2, py + 62, 6, UI.dim, 'center');
     }
 
-    for (var i = 0; i < ACCOUNT_BTNS.length; i++) {
-      var b = ACCOUNT_BTNS[i];
-      var hover = mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h;
-      ctx.fillStyle = hover ? '#FFD700' : '#444466';
-      ctx.fillRect(b.x - 1, b.y - 1, b.w + 2, b.h + 2);
-      ctx.fillStyle = '#0d0d1a';
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-      text(b.label, b.x + b.w / 2, b.y + 7, 6, hover ? '#ffffff' : '#cccccc', 'center');
+    var bx = 140, bw = 200, bh = 22, by = 160;
+    var n = 0;
+    if (runData.playerDisc && canCopy()) {
+      uiButton({ id: 'copy', x: bx, y: by, w: bw, h: bh, icon: 'copy', label: 'COPY VAULT KEY',
+        onClick: function () { copyText(runData.playerSecret, 'VAULT KEY COPIED'); } });
+      n++;
     }
+    uiButton({ id: 'newacct', x: bx, y: by + n * 26, w: bw, h: bh, icon: 'user',
+      label: runData.name ? 'NEW NAME / ACCOUNT' : 'CHOOSE A NAME',
+      onClick: function () { enterNameEntry('title'); } });
+    uiButton({ id: 'loginpc', x: bx, y: by + (n + 1) * 26, w: bw, h: bh, icon: 'key', label: 'LOG IN WITH KEY',
+      onClick: enterLogin });
+    drawHints([['ENTER', 'SELECT'], ['ESC', 'BACK']]);
+  }
 
-    text('ESC / ENTER TO RETURN', W / 2, 240, 6, '#888888', 'center');
+  // ----- LOGIN -----
+  function drawLetterBox(x, y, w, h, ch, active, size) {
+    var border = active ? (game.blinkOn ? UI.gold : UI.goldDim) : (ch ? UI.lineHi : UI.line);
+    drawPanel(x, y, w, h, { fill: active ? '#17140a' : '#0b0b16', border: border, flat: true });
+    if (ch) text(ch, x + w / 2, y + Math.round((h - size) / 2), size, '#ffffff', 'center');
+    else if (active && game.blinkOn) {
+      ctx.fillStyle = UI.gold;
+      ctx.fillRect(x + 4, y + h - 5, w - 8, 2);
+    }
   }
 
   function renderLogin() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
-
-    text('LOGIN', W / 2, 22, 10, '#FFD700', 'center');
-    text('ENTER YOUR TAG AND VAULT KEY', W / 2, 42, 6, '#888888', 'center');
-
+    drawMenuBackdrop(0.86);
+    drawHeader('LOG IN', 'ENTER YOUR TAG AND VAULT KEY');
     var buf = loginForm.buf;
-    // name (3) # disc (4)
     var groups = [
-      { label: 'NAME', start: 0, len: 3, x: 96 },
-      { label: 'TAG #', start: 3, len: 4, x: 216 },
-      { label: 'VAULT KEY', start: 7, len: 8, x: 96, y2: true }
+      { label: 'NAME', start: 0, len: 3, x: 150, y: 62 },
+      { label: 'TAG', start: 3, len: 4, x: 238, y: 62 },
+      { label: 'VAULT KEY', start: 7, len: 8, x: 146, y: 110 }
     ];
     for (var g = 0; g < groups.length; g++) {
       var gr = groups[g];
-      var by = gr.y2 ? 150 : 78;
-      text(gr.label, gr.x, by - 12, 6, '#888888');
+      text(gr.label, gr.x, gr.y - 11, 6, UI.muted);
       for (var i = 0; i < gr.len; i++) {
-        var bx = gr.x + i * 26;
         var idx = gr.start + i;
-        var active = idx === buf.length;
-        ctx.fillStyle = active && game.blinkOn ? '#FFD700' : '#444466';
-        ctx.fillRect(bx - 1, by - 1, 22 + 2, 26 + 2);
-        ctx.fillStyle = '#0d0d1a';
-        ctx.fillRect(bx, by, 22, 26);
-        if (buf[idx]) text(buf[idx], bx + 11, by + 7, 10, '#ffffff', 'center');
+        drawLetterBox(gr.x + i * 24, gr.y, 20, 24, buf[idx], idx === buf.length, 10);
       }
     }
+    text('#', 228, 70, 10, UI.dim, 'center');
 
-    text('A-Z FOR NAME/KEY — 0-9 FOR TAG/KEY — BACKSPACE ERASES', W / 2, 196, 6, '#666666', 'center');
+    var sy = 146;
     if (loginForm.state === 'checking') {
-      text('CHECKING...', W / 2, 216, 8, '#FFD700', 'center');
+      text('CHECKING' + '...'.slice(0, 1 + Math.floor(game.time * 3) % 3), W / 2, sy, 8, UI.gold, 'center');
     } else if (loginForm.state === 'fail') {
-      text('NOT FOUND — CHECK TAG AND KEY', W / 2, 216, 8, '#ff5555', 'center');
+      text('NOT FOUND - CHECK TAG AND KEY', W / 2, sy, 8, UI.red, 'center');
     } else if (loginForm.state === 'offline') {
-      text('OFFLINE — TRY AGAIN LATER', W / 2, 216, 8, '#ff5555', 'center');
-    } else if (buf.length === 15 && game.blinkOn) {
-      text('ENTER OR TAP TO LOGIN', W / 2, 216, 8, '#33cc66', 'center');
-    }
-    text('ESC TO GO BACK', W / 2, 244, 6, '#888888', 'center');
-  }
-
-  function renderAccountInfo() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
-
-    if (account.state === 'creating') {
-      text('CREATING ACCOUNT...', W / 2, 120, 10, '#FFD700', 'center');
-    } else if (account.state === 'created') {
-      text('ACCOUNT CREATED', W / 2, 40, 10, '#33cc66', 'center');
-      text(playerTag(), W / 2, 70, 16, '#00e5ff', 'center');
-      text('YOUR VAULT KEY', W / 2, 110, 6, '#888888', 'center');
-      text(runData.playerSecret, W / 2, 124, 12, '#FFD700', 'center');
-      text('WRITE IT DOWN — IT LOGS YOU IN ON ANY PC', W / 2, 152, 6, '#ff9f1c', 'center');
-      text('(ALSO SAVED HERE — SEE THE NAME MENU)', W / 2, 166, 6, '#666666', 'center');
-      if (game.blinkOn) text('PRESS ENTER OR CLICK TO CONTINUE', W / 2, 206, 8, '#ffffff', 'center');
+      text('OFFLINE - TRY AGAIN LATER', W / 2, sy, 8, UI.red, 'center');
     } else {
-      text('COULD NOT CREATE ACCOUNT', W / 2, 90, 10, '#ff5555', 'center');
-      text('PLAYING WITH LOCAL NAME ' + runData.name, W / 2, 120, 6, '#bbbbbb', 'center');
-      text('AN ACCOUNT WILL BE CREATED WHEN ONLINE', W / 2, 134, 6, '#777777', 'center');
-      if (game.blinkOn) text('PRESS ENTER OR CLICK TO CONTINUE', W / 2, 180, 8, '#ffffff', 'center');
+      text('LETTERS FOR NAME - DIGITS FOR TAG', W / 2, sy, 6, UI.dim, 'center');
     }
+    var ready = buf.length === 15 && loginForm.state !== 'checking';
+    uiButton({ id: 'login', x: 165, y: 164, w: 150, h: 26, kind: 'primary', icon: 'key', label: 'LOG IN',
+      align: 'center', disabled: !ready, isDefault: true, onClick: tryLoginSubmit });
+    drawHints([['TYPE', 'FILL'], ['BKSP', 'ERASE'], ['ENTER', 'LOG IN'], ['ESC', 'BACK']], 'TAP THE BOXES TO TYPE');
   }
 
-  function renderNameEntry() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
-
-    text('ENTER YOUR INITIALS', W / 2, 60, 10, '#FFD700', 'center');
-
-    // three arcade letter boxes
-    var boxW = 36, boxH = 44, gap = 14;
-    var startX = W / 2 - (3 * boxW + 2 * gap) / 2;
-    for (var i = 0; i < 3; i++) {
-      var bx = startX + i * (boxW + gap), by = 110;
-      var active = i === nameDraft.length;
-      ctx.fillStyle = active && game.blinkOn ? '#FFD700' : '#444466';
-      ctx.fillRect(bx - 2, by - 2, boxW + 4, boxH + 4);
-      ctx.fillStyle = '#0d0d1a';
-      ctx.fillRect(bx, by, boxW, boxH);
-      if (nameDraft[i]) {
-        text(nameDraft[i], bx + boxW / 2, by + 12, 20, '#ffffff', 'center');
-      } else if (active && game.blinkOn) {
-        text('_', bx + boxW / 2, by + 12, 20, '#FFD700', 'center');
+  // ----- ACCOUNT CREATED -----
+  function renderAccountInfo() {
+    drawMenuBackdrop(0.86);
+    if (account.state === 'creating') {
+      drawHeader('CREATING ACCOUNT', 'CLAIMING YOUR TAG');
+      text('PLEASE WAIT' + '...'.slice(0, 1 + Math.floor(game.time * 3) % 3), W / 2, 120, 8, UI.muted, 'center');
+      return;
+    }
+    if (account.state === 'created') {
+      drawHeader('ACCOUNT CREATED', 'WELCOME TO THE CRYPT');
+      var px = 100, pw = 280, py = 48, ph = 108;
+      drawPanel(px, py, pw, ph, { fill: 'rgba(14,14,27,0.96)', accent: UI.green });
+      text('YOUR TAG', W / 2, py + 10, 6, UI.muted, 'center');
+      text(playerTag(), W / 2, py + 22, 16, UI.cyan, 'center');
+      text('YOUR VAULT KEY', W / 2, py + 48, 6, UI.muted, 'center');
+      drawVaultKeyBox(W / 2, py + 58, runData.playerSecret);
+      text('WRITE IT DOWN - IT LOGS YOU IN ANYWHERE', W / 2, py + 90, 6, '#ff9f1c', 'center');
+      uiButton({ id: 'continue', x: 140, y: 164, w: 200, h: 26, kind: 'primary', icon: 'play', label: 'CONTINUE',
+        align: 'center', isDefault: true, onClick: finishAccountInfo });
+      if (canCopy()) {
+        uiButton({ id: 'copy', x: 140, y: 196, w: 200, h: 22, icon: 'copy', label: 'COPY VAULT KEY', align: 'center',
+          onClick: function () { copyText(runData.playerSecret, 'VAULT KEY COPIED'); } });
       }
+    } else {
+      drawHeader('OFFLINE', 'COULD NOT CREATE AN ACCOUNT');
+      text('PLAYING WITH LOCAL NAME ' + runData.name, W / 2, 88, 8, UI.text, 'center');
+      text('AN ACCOUNT IS CREATED WHEN YOU ARE BACK ONLINE', W / 2, 106, 6, UI.dim, 'center');
+      uiButton({ id: 'continue', x: 140, y: 140, w: 200, h: 26, kind: 'primary', icon: 'play', label: 'CONTINUE',
+        align: 'center', isDefault: true, onClick: finishAccountInfo });
     }
+    drawHints([['ENTER', 'CONTINUE']]);
+  }
 
-    text('TYPE A-Z  —  BACKSPACE TO ERASE', W / 2, 180, 6, '#888888', 'center');
-    if (nameDraft.length === 3 && game.blinkOn) {
-      text('ENTER OR TAP TO CONFIRM', W / 2, 205, 8, '#33cc66', 'center');
+  // ----- NAME ENTRY -----
+  function renderNameEntry() {
+    drawMenuBackdrop(0.86);
+    drawHeader('YOUR INITIALS', 'SHOWN ON THE GLOBAL LEADERBOARD');
+    var boxW = 36, boxH = 44, gap = 12;
+    var startX = Math.round(W / 2 - (3 * boxW + 2 * gap) / 2);
+    for (var i = 0; i < 3; i++) {
+      drawLetterBox(startX + i * (boxW + gap), 62, boxW, boxH, nameDraft[i], i === nameDraft.length, 20);
     }
-    text('SHOWN ON THE GLOBAL LEADERBOARD', W / 2, 240, 6, '#555555', 'center');
+    text('TYPE 3 LETTERS (A-Z)', W / 2, 118, 6, UI.muted, 'center');
+    uiButton({ id: 'confirm', x: 165, y: 136, w: 150, h: 26, kind: 'primary', icon: 'check', label: 'CONFIRM',
+      align: 'center', disabled: nameDraft.length !== 3, isDefault: true, onClick: confirmName });
+    drawHints([['A-Z', 'TYPE'], ['BKSP', 'ERASE'], ['ENTER', 'CONFIRM'], ['ESC', 'BACK']], 'TAP THE BOXES TO TYPE');
+  }
+
+  // ----- GAME OVER -----
+  function leaveGameOver(again) {
+    if (again) { startRunGate(); return; }
+    if (!runData.seenFeedbackPrompt && runData.totalRuns >= 1) {
+      runData.seenFeedbackPrompt = true;
+      saveRunData();
+      game.gameState = 'feedback';
+    } else {
+      game.gameState = 'title';
+      maybeRefreshLeaderboard();
+    }
   }
 
   function renderGameOver() {
-    // dark red tint background
-    ctx.fillStyle = '#1a0000';
+    // the frozen arena behind a blood-red veil
+    renderWorld();
+    ctx.fillStyle = 'rgba(26,0,4,0.86)';
     ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
+    drawVignette();
+    drawAnimatedScanlines(0.04);
 
-    text('YOU DIED', W / 2, 22, 16, '#ff2d2d', 'center');
+    drawTitleText('YOU DIED', W / 2, 12, 24, '#ff3b3b', '#4a0000');
     if (game.newRecord) {
-      text('★ NEW RECORD ★', W / 2, 46, 8, '#FFD700', 'center');
+      var nr = 'NEW RECORD';
+      var nw = measureText(nr, 8) + 30;
+      drawPanel(W / 2 - nw / 2, 41, nw, 14, { fill: '#2a2206', border: UI.gold, flat: true });
+      if (game.blinkOn) {
+        drawIcon('star', W / 2 - nw / 2 + 5, 44, UI.gold);
+        drawIcon('star', W / 2 + nw / 2 - 13, 44, UI.gold);
+      }
+      text(nr, W / 2, 44, 8, UI.gold, 'center');
     }
 
-    // ----- stat grid: 4 columns, label above value (scannable) -----
-    var mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
+    // ----- stat tiles -----
     var stats = [
-      { l: 'WAVE',  v: pad(game.wave, 2) },
+      { l: 'WAVE', v: pad(game.wave, 2) },
       { l: 'KILLS', v: '' + game.score },
       { l: 'LEVEL', v: pad(game.level, 2) },
-      { l: 'TIME',  v: pad(mins, 1) + ':' + pad(secs, 2) }
+      { l: 'TIME', v: fmtTime(game.time) }
     ];
+    var tw = 96, tg = 8, tx0 = Math.round(W / 2 - (4 * tw + 3 * tg) / 2), ty = 62;
     for (var gi = 0; gi < 4; gi++) {
-      var gcx = (gi + 0.5) * W / 4;
-      text(stats[gi].l, gcx, 66, 6, '#888899', 'center');
-      text(stats[gi].v, gcx, 78, 12, '#ffffff', 'center');
+      var tx = tx0 + gi * (tw + tg);
+      drawPanel(tx, ty, tw, 36, { fill: 'rgba(16,10,18,0.95)', border: '#3e2a3a' });
+      text(stats[gi].l, tx + tw / 2, ty + 6, 6, UI.muted, 'center');
+      text(stats[gi].v, tx + tw / 2, ty + 18, 12, '#ffffff', 'center');
     }
-    // class + coins earned (unified coin display)
-    text(currentClass.toUpperCase(), W / 2, 104, 6, '#bbbbbb', 'center');
-    drawCoinText(W / 2, 116, '+' + Math.round(game.coinsEarned));
 
-    // ----- damage attribution: a stacked bar (what actually carried the run) -----
+    // ----- class + coins earned -----
+    var rx = tx0, rw = 4 * tw + 3 * tg, ry = 104;
+    drawPanel(rx, ry, rw, 22, { fill: 'rgba(16,10,18,0.95)', border: '#3e2a3a' });
+    drawHeroIcon(currentClass, rx + 6, ry + 3, 16);
+    text(classDef(currentClass).name, rx + 28, ry + 8, 8, classTextColor(currentClass));
+    text('COINS EARNED', rx + rw - 72, ry + 9, 6, UI.muted, 'right');
+    drawCoinAmount(rx + rw - 8, ry + 7, '+' + Math.round(game.coinsEarned), 'right', 8);
+
+    // ----- damage attribution: what actually carried the run -----
+    var dy = 132;
     if (game.dmgDealt > 0) {
       var order = ['shot', 'orb', 'static', 'bomb', 'ability', 'pact', 'other'];
       var labels = { shot: 'SHOTS', orb: 'ORBS', static: 'STATIC', bomb: 'BOMB', ability: 'ABILITY', pact: 'BLASTS', other: 'OTHER' };
@@ -5121,9 +5563,10 @@
         var v = game.dmgBySource[order[di]] || 0;
         if (v > 0) parts.push({ k: order[di], pct: Math.round(100 * v / game.dmgDealt) });
       }
-      text('DAMAGE DEALT  ' + Math.round(game.dmgDealt), W / 2, 138, 6, '#888899', 'center');
-      // the stacked bar
-      var barX = 70, barY = 150, barW = 340, barH = 10, sx = barX;
+      drawPanel(rx, dy, rw, 42, { fill: 'rgba(16,10,18,0.95)', border: '#3e2a3a' });
+      text('DAMAGE DEALT', rx + 8, dy + 6, 6, UI.muted);
+      text(String(Math.round(game.dmgDealt)), rx + rw - 8, dy + 6, 6, UI.text, 'right');
+      var barX = rx + 8, barY = dy + 16, barW = rw - 16, barH = 8, sx = barX;
       ctx.fillStyle = '#000'; ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
       ctx.fillStyle = '#1a1420'; ctx.fillRect(barX, barY, barW, barH);
       for (var si = 0; si < parts.length; si++) {
@@ -5132,78 +5575,117 @@
         ctx.fillRect(sx, barY, segW, barH);
         sx += segW;
       }
-      // legend, centred: colour swatch + LABEL pct%
-      ctx.font = '6px "Press Start 2P"';
       var lstrs = parts.map(function (pp) { return labels[pp.k] + ' ' + pp.pct + '%'; });
       var lw = 0;
-      for (var li = 0; li < lstrs.length; li++) lw += 9 + ctx.measureText(lstrs[li]).width + 12;
+      for (var li = 0; li < lstrs.length; li++) lw += 9 + measureText(lstrs[li], 6) + 12;
       lw -= 12;
-      var lx = W / 2 - lw / 2;
+      var lx = Math.round(W / 2 - lw / 2);
       for (var lj = 0; lj < parts.length; lj++) {
         ctx.fillStyle = cols[parts[lj].k];
-        ctx.fillRect(lx, 168, 5, 5);
-        text(lstrs[lj], lx + 9, 168, 6, '#cccccc');
-        lx += 9 + ctx.measureText(lstrs[lj]).width + 12;
+        ctx.fillRect(lx, dy + 30, 5, 5);
+        text(lstrs[lj], lx + 9, dy + 30, 6, UI.text);
+        lx += 9 + measureText(lstrs[lj], 6) + 12;
       }
     }
 
-    // ----- best + submit status (secondary) -----
-    text('BEST  W' + pad(runData.bestWave, 2) + ' · ' + runData.bestKills + ' KILLS · LVL ' + pad(runData.bestLevel, 2),
-         W / 2, 190, 6, '#777788', 'center');
+    // ----- best + leaderboard submission -----
+    text('BEST  W' + pad(runData.bestWave, 2) + ' - ' + runData.bestKills + ' KILLS - LVL ' + pad(runData.bestLevel, 2),
+         W / 2, 180, 6, UI.muted, 'center');
     if (leaderboard.submitState === 'sending') {
-      text('SUBMITTING SCORE...', W / 2, 204, 6, '#777777', 'center');
+      text('SUBMITTING SCORE...', W / 2, 192, 6, UI.dim, 'center');
     } else if (leaderboard.submitState === 'done') {
-      text('SUBMITTED AS ' + runData.name, W / 2, 204, 6, '#33cc66', 'center');
+      text('SCORE SUBMITTED AS ' + playerTag(), W / 2, 192, 6, UI.green, 'center');
     } else if (leaderboard.submitState === 'error') {
-      text('SUBMIT FAILED — OFFLINE?', W / 2, 204, 6, '#883333', 'center');
+      text('SUBMIT FAILED - OFFLINE?', W / 2, 192, 6, UI.red, 'center');
     }
 
-    if (game.blinkOn) {
-      text('PRESS ENTER OR CLICK TO RESTART', W / 2, 236, 6, '#ffffff', 'center');
-    }
+    var locked = game.overLock > 0;
+    uiButton({ id: 'again', x: W / 2 - 124, y: 208, w: 120, h: 26, kind: 'primary', icon: 'retry', label: 'PLAY AGAIN',
+      align: 'center', isDefault: true, disabled: locked, onClick: function () { leaveGameOver(true); } });
+    uiButton({ id: 'menu', x: W / 2 + 4, y: 208, w: 120, h: 26, icon: 'home', label: 'MAIN MENU',
+      align: 'center', disabled: locked, onClick: function () { leaveGameOver(false); } });
+    drawHints([['ENTER', 'SELECT'], ['ESC', 'MAIN MENU']]);
   }
 
-  function renderLevelUp() {
-    // render frozen world behind
+  // ----- PAUSE -----
+  var PAUSE_PANEL = { x: 150, y: 54, w: 180, h: 158 };
+  function renderPaused() {
     renderWorld();
     renderHUD();
-    // dark overlay
-    ctx.fillStyle = 'rgba(0,0,10,0.75)';
+    ctx.fillStyle = 'rgba(2,2,10,0.72)';
+    ctx.fillRect(0, 0, W, H);
+    var pp = PAUSE_PANEL;
+    drawPanel(pp.x, pp.y, pp.w, pp.h, { fill: 'rgba(14,14,27,0.97)', accent: UI.gold });
+    drawTitleText('PAUSED', W / 2, pp.y + 12, 16, UI.gold, '#6b3a00');
+    text('WAVE ' + pad(game.wave, 2) + ' - ' + game.score + ' KILLS - ' + fmtTime(game.time),
+         W / 2, pp.y + 34, 6, UI.muted, 'center');
+    var bx = pp.x + 14, bw = pp.w - 28, bh = 22, by = pp.y + 48;
+    uiButton({ id: 'resume', x: bx, y: by, w: bw, h: bh, kind: 'primary', icon: 'play', label: 'RESUME',
+      isDefault: true, onClick: function () { game.gameState = 'playing'; } });
+    uiButton({ id: 'music', x: bx, y: by + 27, w: bw, h: bh, icon: 'music', label: 'MUSIC', onClick: toggleMute,
+      right: function (xr, cy) { drawToggle(xr, cy, !musicMuted); } });
+    uiButton({ id: 'sfx', x: bx, y: by + 54, w: bw, h: bh, icon: 'sfx', label: 'SOUND FX', onClick: toggleSfx,
+      right: function (xr, cy) { drawToggle(xr, cy, !sfxMuted); } });
+    uiButton({ id: 'endrun', x: bx, y: by + 81, w: bw, h: bh, kind: 'danger', icon: 'cross',
+      label: pauseEndArmed ? 'CONFIRM END?' : 'END RUN',
+      onClick: function () {
+        if (!pauseEndArmed) { pauseEndArmed = true; return; }
+        pauseEndArmed = false;
+        endRun();
+      } });
+    drawHints([['P / ESC', 'RESUME'], ['ENTER', 'SELECT']], 'TAP OUTSIDE TO RESUME');
+  }
+
+  // ----- LEVEL UP -----
+  // the draft locks for a moment so a held key or a mid-fight tap can't
+  // pick a card the player never saw
+  var DRAFT_LOCK = 0.4;
+  function draftIntro() { return clamp(1 - (game.draftLock || 0) / DRAFT_LOCK, 0, 1); }
+
+  function renderLevelUp() {
+    renderWorld();
+    renderHUD();
+    ctx.fillStyle = 'rgba(0,0,10,0.78)';
     ctx.fillRect(0, 0, W, H);
 
-    text('LEVEL UP!  CHOOSE AN UPGRADE', W / 2, 30, 8, '#FFD700', 'center');
+    drawTitleText('LEVEL UP!', W / 2, 10, 12, UI.gold, '#6b3a00');
+    text('CHOOSE AN UPGRADE', W / 2, 27, 6, UI.muted, 'center');
 
+    var intro = draftIntro();
+    var slide = Math.round((1 - intro) * 10);
+    ctx.globalAlpha = 0.35 + 0.65 * intro;
     for (var i = 0; i < game.cards.length; i++) {
       var c = game.cards[i];
-      var hover = mouse.x >= c.x && mouse.x <= c.x + c.w &&
-                  mouse.y >= c.y && mouse.y <= c.y + c.h;
+      var cy = c.y + slide;
+      var hover = intro >= 1 && game.cardFocus === i;
 
       var cursed = !!c.upgrade.cursed;
       var evo = !!c.upgrade.evolution;
       var tierColor = evo ? '#ff2dd0' : (cursed ? '#9b59b6' : '#FFD700');
       var cx2 = c.x + c.w / 2;
+      var lift = hover ? 3 : 0;
+      cy -= lift;
 
-      // hover glow border (2px outside)
       if (hover) {
         ctx.fillStyle = evo ? 'rgba(255,45,208,0.45)' : (cursed ? 'rgba(155,89,182,0.45)' : 'rgba(255,215,0,0.35)');
-        ctx.fillRect(c.x - 4, c.y - 4, c.w + 8, c.h + 8);
+        ctx.fillRect(c.x - 4, cy - 4, c.w + 8, c.h + 8);
       }
-      // tier frame + dark card face
       ctx.fillStyle = tierColor;
-      ctx.fillRect(c.x - 2, c.y - 2, c.w + 4, c.h + 4);
+      ctx.fillRect(c.x - 2, cy - 2, c.w + 4, c.h + 4);
       ctx.fillStyle = evo ? '#1f1018' : (cursed ? '#16101f' : '#1a1a2e');
-      ctx.fillRect(c.x, c.y, c.w, c.h);
+      ctx.fillRect(c.x, cy, c.w, c.h);
 
       // tier banner across the top — the at-a-glance rarity signal
       ctx.fillStyle = tierColor;
-      ctx.fillRect(c.x, c.y, c.w, 11);
-      text(evo ? 'EVOLUTION' : (cursed ? 'CURSED' : 'STANDARD'), cx2, c.y + 3, 6, '#0d0d1a', 'center');
+      ctx.fillRect(c.x, cy, c.w, 11);
+      text(evo ? 'EVOLUTION' : (cursed ? 'CURSED' : 'STANDARD'), cx2, cy + 3, 6, '#0d0d1a', 'center');
+      if (showKeyHints()) drawKeycap(String(i + 1), c.x + 1, cy + 1);
+      var owned = game.player.upgradesTaken[c.upgrade.id] || 0;
+      if (owned > 0) text('x' + owned, c.x + c.w - 3, cy + 3, 6, '#0d0d1a', 'right');
 
-      // card name
-      wrapText(c.upgrade.name, cx2, c.y + 17, 8, '#ffffff', c.w - 8);
+      wrapText(c.upgrade.name, cx2, cy + 17, 8, '#ffffff', c.w - 8);
 
-      // framed pixel art (the "card art" window)
-      var artX = cx2 - 28, artY = c.y + 30;
+      var artX = cx2 - 28, artY = cy + 30;
       ctx.fillStyle = tierColor;
       ctx.fillRect(artX - 1, artY - 1, 58, 58);
       ctx.fillStyle = '#0a0a14';
@@ -5233,34 +5715,31 @@
         }
       }
       if (completesRecipe && game.blinkOn) {
-        // pulse: this pick births an evolution next level
         ctx.fillStyle = 'rgba(255,45,208,0.4)';
-        ctx.fillRect(c.x - 5, c.y - 5, c.w + 10, 3);
-        ctx.fillRect(c.x - 5, c.y + c.h + 2, c.w + 10, 3);
-        ctx.fillRect(c.x - 5, c.y - 5, 3, c.h + 10);
-        ctx.fillRect(c.x + c.w + 2, c.y - 5, 3, c.h + 10);
+        ctx.fillRect(c.x - 5, cy - 5, c.w + 10, 3);
+        ctx.fillRect(c.x - 5, cy + c.h + 2, c.w + 10, 3);
+        ctx.fillRect(c.x - 5, cy - 5, 3, c.h + 10);
+        ctx.fillRect(c.x + c.w + 2, cy - 5, 3, c.h + 10);
       }
 
-      // effect (white), downside (red), rules text (dim) or recipe hint (gold)
-      wrapText(c.upgrade.desc, cx2, c.y + 92, 6, '#ffffff', c.w - 10);
+      // effect (white), downside (red), rules text (dim) or recipe hint (gold),
+      // each block starting below the previous one
+      var ty = cy + 91;
+      ty += wrapText(c.upgrade.desc.toUpperCase(), cx2, ty, 6, '#ffffff', c.w - 8) * 9 + 4;
       if (c.upgrade.con) {
-        wrapText('BUT: ' + c.upgrade.con, cx2, c.y + 112, 6, '#ff5555', c.w - 10);
+        ty += wrapText('BUT: ' + c.upgrade.con, cx2, ty, 6, '#ff6b6b', c.w - 8) * 9 + 4;
       }
       if (recipeHint) {
-        wrapText(recipeHint, cx2, c.y + 130, 6, completesRecipe ? '#ff2dd0' : '#FFD700', c.w - 10);
+        wrapText(recipeHint, cx2, ty, 6, completesRecipe ? '#ff5bd8' : '#FFD700', c.w - 8);
       } else if (c.upgrade.detail) {
-        wrapText(c.upgrade.detail, cx2, c.y + 130, 6, '#777799', c.w - 10);
+        wrapText(c.upgrade.detail, cx2, ty, 6, '#9a98b8', c.w - 8);
       }
 
-      // count owned
-      var owned = game.player.upgradesTaken[c.upgrade.id] || 0;
-      if (owned > 0) {
-        text('OWNED x' + owned, cx2, c.y + c.h - 12, 6, '#999999', 'center');
-      }
-      // bottom accent stripe in the upgrade's own colour
       ctx.fillStyle = c.upgrade.color;
-      ctx.fillRect(c.x, c.y + c.h - 4, c.w, 4);
+      ctx.fillRect(c.x, cy + c.h - 4, c.w, 4);
     }
+    ctx.globalAlpha = 1;
+    drawHints([['1-3', 'PICK'], ['ARROWS', 'BROWSE'], ['ENTER', 'TAKE']], 'TAP A CARD');
   }
 
   // Ascendancy draft: two mutually-exclusive subclass cards after the first
@@ -5268,39 +5747,40 @@
   function renderAscend() {
     renderWorld();
     renderHUD();
-    ctx.fillStyle = 'rgba(0,0,10,0.8)';
+    ctx.fillStyle = 'rgba(0,0,10,0.82)';
     ctx.fillRect(0, 0, W, H);
 
-    text((game.lastBossName || 'THE BOSS') + ' FALLS', W / 2, 14, 8, '#ff2d2d', 'center');
-    text('CHOOSE YOUR ASCENDANCY', W / 2, 26, 10, '#FFD700', 'center');
-    if (game.blinkOn) text('THIS CHOICE IS FOREVER', W / 2, 40, 6, '#9b59b6', 'center');
+    text((game.lastBossName || 'THE BOSS') + ' FALLS', W / 2, 8, 8, '#ff4d4d', 'center');
+    drawTitleText('CHOOSE YOUR ASCENDANCY', W / 2, 20, 10, UI.gold, '#6b3a00');
+    if (game.blinkOn) text('THIS CHOICE IS FOREVER', W / 2, 35, 6, UI.purple, 'center');
 
+    var intro = draftIntro();
+    var slide = Math.round((1 - intro) * 10);
+    ctx.globalAlpha = 0.35 + 0.65 * intro;
     for (var i = 0; i < game.cards.length; i++) {
       var c = game.cards[i];
       var a = c.asc;
-      var hover = mouse.x >= c.x && mouse.x <= c.x + c.w &&
-                  mouse.y >= c.y && mouse.y <= c.y + c.h;
+      var hover = intro >= 1 && game.cardFocus === i;
+      var cy = c.y + slide - (hover ? 3 : 0);
       var cx2 = c.x + c.w / 2;
 
       if (hover) {
         ctx.fillStyle = 'rgba(255,215,0,0.4)';
-        ctx.fillRect(c.x - 4, c.y - 4, c.w + 8, c.h + 8);
+        ctx.fillRect(c.x - 4, cy - 4, c.w + 8, c.h + 8);
       }
-      // gold frame + dark face
       ctx.fillStyle = '#FFD700';
-      ctx.fillRect(c.x - 2, c.y - 2, c.w + 4, c.h + 4);
+      ctx.fillRect(c.x - 2, cy - 2, c.w + 4, c.h + 4);
       ctx.fillStyle = '#141020';
-      ctx.fillRect(c.x, c.y, c.w, c.h);
+      ctx.fillRect(c.x, cy, c.w, c.h);
 
-      // banner in the ascendancy's own colour
       ctx.fillStyle = a.color;
-      ctx.fillRect(c.x, c.y, c.w, 12);
-      text('ASCENDANCY', cx2, c.y + 3, 6, '#0d0d1a', 'center');
+      ctx.fillRect(c.x, cy, c.w, 12);
+      text('ASCENDANCY', cx2, cy + 3, 6, '#0d0d1a', 'center');
+      if (showKeyHints()) drawKeycap(String(i + 1), c.x + 1, cy + 1);
 
-      text(a.name, cx2, c.y + 19, 10, '#ffffff', 'center');
+      text(a.name, cx2, cy + 19, 10, '#ffffff', 'center');
 
-      // framed pixel art
-      var artX = cx2 - 26, artY = c.y + 34;
+      var artX = cx2 - 26, artY = cy + 34;
       ctx.fillStyle = a.color;
       ctx.fillRect(artX - 1, artY - 1, 54, 54);
       ctx.fillStyle = '#0a0a14';
@@ -5308,16 +5788,17 @@
       var art = CARD_ART[a.id];
       if (art) drawPixelIcon(art, artX + 2, artY + 2, 4);
 
-      // active (white), cooldown (dim), passive (green)
-      wrapText(a.active, cx2, c.y + 96, 6, '#ffffff', c.w - 12);
-      text('COOLDOWN ' + a.cd + 's', cx2, c.y + 124, 6, '#777799', 'center');
-      wrapText(a.passive, cx2, c.y + 136, 6, '#1dd1a1', c.w - 12);
-      text('SPACE / TAP BUTTON', cx2, c.y + c.h - 14, 6, '#9fb0c0', 'center');
+      var ay = cy + 94;
+      ay += wrapText(a.active.toUpperCase(), cx2, ay, 6, '#ffffff', c.w - 12) * 9 + 3;
+      text('COOLDOWN ' + a.cd + 'S', cx2, ay, 6, '#9a98b8', 'center');
+      wrapText(a.passive.toUpperCase(), cx2, ay + 13, 6, '#1dd1a1', c.w - 12);
+      text('SPACE / TAP BUTTON', cx2, cy + c.h - 14, 6, '#9fb0c0', 'center');
 
-      // bottom accent stripe
       ctx.fillStyle = a.color;
-      ctx.fillRect(c.x, c.y + c.h - 4, c.w, 4);
+      ctx.fillRect(c.x, cy + c.h - 4, c.w, 4);
     }
+    ctx.globalAlpha = 1;
+    drawHints([['1-2', 'PICK'], ['ARROWS', 'BROWSE'], ['ENTER', 'TAKE']], 'TAP A CARD');
   }
 
   function drawClassIcon(id, x, y) {
@@ -5401,122 +5882,88 @@
     }
   }
 
-  // Unified coin display: gold coin icon + text, centred as a group at cx.
-  // Used everywhere a coin amount is shown so the presentation is identical.
-  function drawCoinText(cx, y, s) {
-    var groupW = 8 + s.length * 6;
-    var lx = Math.round(cx - groupW / 2);
-    ctx.fillStyle = '#FFD700'; ctx.fillRect(lx, y - 1, 6, 6);
-    ctx.fillStyle = '#aa8800'; ctx.fillRect(lx + 1, y, 4, 4);
-    ctx.fillStyle = '#ffe98a'; ctx.fillRect(lx + 1, y, 2, 2);
-    text(s, lx + 10, y, 6, '#FFD700');
-  }
+  // ----- CLASS SELECT -----
+  var classSelFocus = 0; // last class card the player looked at
 
-  function drawCoinBalance(cx, y) {
-    drawCoinText(cx, y, String(Math.round(runData.coins)));
+  function drawClassCard(b, hot) {
+    var cls = b.cls, i = b.index;
+    var owned = classOwned(cls), pending = classUnlockPending === cls.id;
+    var x = b.x, w = b.w, h = b.h, y = b.y - (hot ? 3 : 0);
+    var tcol = classTextColor(cls.id);
+    if (hot) {
+      ctx.fillStyle = 'rgba(255,215,0,0.22)';
+      ctx.fillRect(x - 3, y - 3, w + 6, h + 6);
+    }
+    drawPanel(x, y, w, h, { fill: hot ? '#17172c' : 'rgba(14,14,27,0.95)', border: hot ? UI.gold : (owned ? cls.color : UI.line) });
+    ctx.fillStyle = cls.color;
+    ctx.fillRect(x + 1, y + 1, w - 2, 2);
+    if (showKeyHints()) drawKeycap(String(i + 1), x + 4, y + 6);
+
+    var ns = measureText(cls.name, 8) <= w - 6 ? 8 : 6;
+    text(cls.name, x + w / 2, y + 20, ns, owned ? '#ffffff' : UI.muted, 'center');
+
+    // hero (wearing the equipped skin) with the weapon tucked beside it
+    drawHeroIcon(cls.id, Math.round(x + w / 2 - 16), y + 32, 32);
+    if (cls.id !== 'bombardier') drawClassIcon(cls.id, x + w - 38, y + 28);
+
+    var labels = ['HP', 'SPD', 'PWR'];
+    for (var s = 0; s < 3; s++) {
+      var sy = y + 72 + s * 11;
+      text(labels[s], x + 6, sy, 6, UI.muted);
+      for (var sg = 0; sg < 5; sg++) {
+        ctx.fillStyle = sg < cls.bars[s] ? cls.color : '#26263a';
+        ctx.fillRect(x + 32 + sg * 9, sy, 7, 6);
+      }
+    }
+
+    if (!owned) {
+      ctx.fillStyle = 'rgba(6,6,14,0.74)';
+      ctx.fillRect(x + 1, y + 28, w - 2, h - 29);
+      drawIcon('lock', x + w / 2 - 8, y + 42, UI.gold, 2);
+      if (pending) {
+        text('TAP AGAIN', x + w / 2, y + 104, 6, UI.green, 'center');
+        text('TO BUY', x + w / 2, y + 114, 6, UI.green, 'center');
+      } else {
+        text('UNLOCK', x + w / 2, y + 102, 6, '#ffffff', 'center');
+        drawCoinAmount(x + w / 2, y + 113, cls.price, 'center', 8, runData.coins >= cls.price ? UI.gold : '#c05050');
+      }
+    } else {
+      text(CLASS_BLURB[cls.id] || '', x + w / 2, y + 110, 6, tcol, 'center');
+    }
   }
 
   function renderClassSelect() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
+    drawMenuBackdrop(0.86);
+    drawHeader('CHOOSE YOUR CLASS', null);
+    drawWallet();
 
-    text('CHOOSE YOUR CLASS', W / 2, 24, 10, '#FFD700', 'center');
-    drawCoinBalance(W / 2, 45);
-
-    var labels = ['HP', 'SPD', 'PWR'];
     for (var i = 0; i < classCards.length; i++) {
       var c = classCards[i];
-      var cls = c.cls;
-      var owned = classOwned(cls);
-      var pending = classUnlockPending === cls.id;
-      var hover = mouse.x >= c.x && mouse.x <= c.x + c.w &&
-                  mouse.y >= c.y && mouse.y <= c.y + c.h;
-
-      // 2px border: gold on hover, class colour otherwise
-      ctx.fillStyle = hover ? '#FFD700' : cls.color;
-      ctx.fillRect(c.x - 2, c.y - 2, c.w + 4, c.h + 4);
-      ctx.fillStyle = '#101020';
-      ctx.fillRect(c.x, c.y, c.w, c.h);
-
-      // hero sprite centred; weapon icon tucked in the corner
-      var spx = Math.round(c.x + c.w / 2 - 16);
-      if (cls.id === 'bombardier') {
-        drawBombardierAt(c.x + c.w / 2, c.y + 40, 2, 1, '#ff8c1a');
-        drawClassIcon(cls.id, c.x + c.w - 34, c.y + 18);
-      } else if (drawTile(cls.tile, spx, c.y + 22, 32, 32, false)) {
-        drawClassIcon(cls.id, c.x + c.w - 34, c.y + 18);
-      } else {
-        drawClassIcon(cls.id, c.x + c.w / 2 - 20, c.y + 22);
-      }
-
-      // three compact 5-segment stat bars
-      for (var b = 0; b < 3; b++) {
-        var by = c.y + 66 + b * 14;
-        text(labels[b], c.x + 5, by, 6, '#bbbbbb');
-        for (var sg = 0; sg < 5; sg++) {
-          ctx.fillStyle = sg < cls.bars[b] ? cls.color : '#2a2a3a';
-          ctx.fillRect(c.x + 36 + sg * 8, by, 7, 6);
-        }
-      }
-
-      // lock overlay for coin-unlocked classes
-      if (!owned) {
-        ctx.fillStyle = 'rgba(6,6,14,0.72)';
-        ctx.fillRect(c.x, c.y, c.w, c.h);
-        var lx = c.x + c.w / 2;
-        // padlock: shackle + body + keyhole
-        ctx.strokeStyle = '#FFD700';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(lx, c.y + 44, 4, Math.PI, 0);
-        ctx.stroke();
-        ctx.fillStyle = '#FFD700';
-        ctx.fillRect(lx - 6, c.y + 44, 12, 9);
-        ctx.fillStyle = '#101020';
-        ctx.fillRect(lx - 1, c.y + 47, 2, 3);
-        // unlock text sits below the (dimmed) stat bars, clear of them
-        if (pending) {
-          text('TAP AGAIN', lx, c.y + 110, 6, '#33cc66', 'center');
-          text('TO BUY ' + cls.price + 'c', lx, c.y + 124, 6, '#FFD700', 'center');
-        } else {
-          text('UNLOCK', lx, c.y + 110, 6, '#ffffff', 'center');
-          text(cls.price + 'c', lx, c.y + 124, 8, '#FFD700', 'center');
-        }
-      }
-
-      // owned classes: a short playstyle tag fills the lower panel
-      if (owned) {
-        var BLURBS = { warrior: 'FRONTLINE', rogue: 'HIT & RUN', mage: 'ARCANE PIERCE',
-                       ranger: 'LONG RANGE', bombardier: 'EXPLOSIONS' };
-        text(BLURBS[cls.id] || '', c.x + c.w / 2, c.y + 116, 6, cls.color, 'center');
-      }
-
-      // name + number on top so they stay crisp over the lock overlay
-      text(cls.name, c.x + c.w / 2, c.y + 9, 6, '#ffffff', 'center');
-      text(String(i + 1), c.x + 4, c.y + 6, 6, '#666666');
+      uiButton({ id: 'class_' + c.cls.id, x: c.x, y: c.y, w: c.w, h: c.h, cls: c.cls, index: i,
+        isDefault: c.cls.id === currentClass,
+        onClick: (function (n) { return function () { selectClassByIndex(n); }; })(i),
+        draw: drawClassCard });
     }
+    var f = uiFocused();
+    if (f && f.cls) classSelFocus = f.index;
+    var cls = CLASSES[classSelFocus] || CLASSES[0];
 
-    // COSMETICS button, centred below the cards (back is the shared top-left button)
-    var ccb = CLASS_COSM_BTN;
-    var ccH = mouse.x >= ccb.x && mouse.x <= ccb.x + ccb.w && mouse.y >= ccb.y && mouse.y <= ccb.y + ccb.h;
-    ctx.fillStyle = ccH ? '#26263a' : '#161622';
-    ctx.fillRect(ccb.x, ccb.y, ccb.w, ccb.h);
-    ctx.strokeStyle = chromaColor(); ctx.lineWidth = 1;
-    ctx.strokeRect(ccb.x + 0.5, ccb.y + 0.5, ccb.w - 1, ccb.h - 1);
-    text('COSMETICS', ccb.x + ccb.w / 2, ccb.y + 6, 6, '#FFD700', 'center');
+    // detail strip for the focused class
+    var dx = 18, dw = W - 36, dy = 178;
+    drawPanel(dx, dy, dw, 36, { fill: 'rgba(14,14,27,0.95)' });
+    text(cls.name, dx + 10, dy + 8, 8, classTextColor(cls.id));
+    var fire = cls.cooldown.toFixed(cls.cooldown < 1 ? 2 : 1);
+    text('HP ' + cls.hp + '  SPD ' + cls.speed + '  DMG ' + cls.damage + '  FIRE ' + fire + 's' +
+         (cls.pierce ? '  PIERCE ' + cls.pierce : ''), dx + dw - 10, dy + 9, 6, UI.muted, 'right');
+    text(CLASS_DESC[cls.id] || '', dx + 10, dy + 22, 6, UI.text);
 
-    text('CLICK A CLASS OR PRESS 1-5', W / 2, 250, 6, '#888888', 'center');
-  }
-
-  // Shop rows are also used as click targets.
-  function shopRowRect(i) {
-    return { x: 36, y: 66 + i * 33, w: 408, h: 29 };
-  }
-  // the "upgrade" button sub-region on the right of a tome row
-  function shopUpgradeRect(i) {
-    var r = shopRowRect(i);
-    return { x: r.x + r.w - 84, y: r.y + 5, w: 78, h: 19 };
+    var owned = classOwned(cls);
+    uiButton({ id: 'skins', x: W / 2 - 124, y: 222, w: 120, h: 22, icon: 'skins', label: 'SKINS', align: 'center',
+      iconColor: chromaColor(), onClick: function () { openWardrobe('classselect', cls.id); } });
+    uiButton({ id: 'start', x: W / 2 + 4, y: 222, w: 120, h: 22, kind: 'primary', icon: owned ? 'play' : 'lock',
+      label: owned ? 'START RUN' : (classUnlockPending === cls.id ? 'CONFIRM BUY' : 'UNLOCK'), align: 'center',
+      onClick: function () { selectClassByIndex(classSelFocus); } });
+    drawHints([['1-5', 'PICK'], ['ARROWS', 'BROWSE'], ['ENTER', 'SELECT'], ['ESC', 'BACK']], 'TAP A CLASS TO PLAY');
   }
 
   // Small colored "tome" book icon (distinct colour per tome).
@@ -5534,73 +5981,79 @@
     ctx.fillRect(x + 5, y + 6, s - 10, 1);
   }
 
+  // ----- THE VAULT (permanent tomes) -----
   function renderShop() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
+    drawMenuBackdrop(0.86);
+    drawHeader('THE VAULT', 'PERMANENT UPGRADES - EQUIP UP TO ' + MAX_EQUIPPED_TOMES + ' TOMES PER RUN');
+    drawWallet();
 
-    text('THE VAULT', W / 2, 12, 10, '#FFD700', 'center');
-    drawCoinBalance(W / 2, 28);
-    text('TOMES  —  EQUIP ' + runData.equippedTomes.length + '/' + MAX_EQUIPPED_TOMES,
-         W / 2, 44, 6, '#ffffff', 'center');
-    for (var i = 0; i < SHOP_ITEMS.length; i++) {
-      var item = SHOP_ITEMS[i];
-      var lvl = runData.shop[item.id] || 0;
-      var equipped = isTomeEquipped(item.id);
-      var r = shopRowRect(i);
-      var ur = shopUpgradeRect(i);
-      var hover = mouse.x >= r.x && mouse.x <= r.x + r.w && mouse.y >= r.y && mouse.y <= r.y + r.h;
-      var uHover = mouse.x >= ur.x && mouse.x <= ur.x + ur.w && mouse.y >= ur.y && mouse.y <= ur.y + ur.h;
-      var maxed = lvl >= 5;
-      var price = maxed ? 0 : SHOP_PRICES[lvl];
-      var affordable = !maxed && runData.coins >= price;
-
-      ctx.fillStyle = hover ? '#20202e' : '#16161f';
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-      if (equipped) {
-        ctx.globalAlpha = 0.10; ctx.fillStyle = item.color;
-        ctx.fillRect(r.x, r.y, r.w, r.h); ctx.globalAlpha = 1;
-        ctx.fillStyle = item.color; ctx.fillRect(r.x, r.y, 3, r.h);
-      }
-      ctx.fillStyle = equipped ? item.color : '#333344';
-      ctx.fillRect(r.x, r.y, r.w, 1);
-      ctx.fillRect(r.x, r.y + r.h - 1, r.w, 1);
-
-      drawTomeIcon(item.color, r.x + 7, r.y + 7, 14);
-      text(item.name, r.x + 28, r.y + 5, 6, '#ffffff');
-      text(item.desc, r.x + 28, r.y + 16, 6, '#888888');
-
-      var mx = r.x + 214;
-      for (var pip = 0; pip < 5; pip++) {
-        ctx.fillStyle = pip < lvl ? item.color : '#2a2a3a';
-        ctx.fillRect(mx + pip * 9, r.y + 5, 6, 6);
-      }
-      ctx.fillStyle = equipped ? '#33cc66' : '#2a2a3a';
-      ctx.fillRect(mx, r.y + 16, 7, 7);
-      if (equipped) { ctx.fillStyle = '#0d0d1a'; ctx.fillRect(mx + 2, r.y + 18, 3, 3); }
-      text(equipped ? 'EQUIPPED' : 'EQUIP', mx + 11, r.y + 17, 6, equipped ? '#33cc66' : '#777777');
-
-      ctx.fillStyle = uHover && affordable ? '#3a3a20' : '#0d0d14';
-      ctx.fillRect(ur.x, ur.y, ur.w, ur.h);
-      ctx.strokeStyle = maxed ? '#33cc66' : (affordable ? '#FFD700' : '#442222');
-      ctx.lineWidth = 1;
-      ctx.strokeRect(ur.x + 0.5, ur.y + 0.5, ur.w - 1, ur.h - 1);
-      if (maxed) text('MAX LVL', ur.x + ur.w / 2, ur.y + 7, 6, '#33cc66', 'center');
-      else text('UP ' + price + 'c', ur.x + ur.w / 2, ur.y + 7, 6, affordable ? '#FFD700' : '#883333', 'center');
+    // equipped slots
+    var slotsW = 3 * 18 - 4, sx0 = Math.round(W / 2 - (measureText('EQUIPPED', 6) + 8 + slotsW) / 2);
+    text('EQUIPPED', sx0, 47, 6, UI.muted);
+    var slx = sx0 + measureText('EQUIPPED', 6) + 8;
+    for (var sl = 0; sl < MAX_EQUIPPED_TOMES; sl++) {
+      var tid = runData.equippedTomes[sl];
+      var titem = null;
+      for (var si = 0; si < SHOP_ITEMS.length; si++) if (SHOP_ITEMS[si].id === tid) titem = SHOP_ITEMS[si];
+      drawPanel(slx + sl * 18, 42, 14, 14, { fill: '#0a0a14', border: titem ? titem.color : UI.line, flat: true });
+      if (titem) drawTomeIcon(titem.color, slx + sl * 18 + 2, 44, 10);
     }
-    text('TAP TOME = EQUIP (MAX 3)   TAP PRICE = UPGRADE', W / 2, 236, 6, '#888888', 'center');
-    text('ESC / ENTER TO RETURN', W / 2, 248, 6, '#666666', 'center');
+
+    var x = 24, w = 432, upW = 88;
+    for (var i = 0; i < SHOP_ITEMS.length; i++) {
+      (function (item, idx, ry) {
+        var lvl = runData.shop[item.id] || 0;
+        var equipped = isTomeEquipped(item.id);
+        var maxed = lvl >= 5;
+        var price = maxed ? 0 : SHOP_PRICES[lvl];
+        var affordable = !maxed && runData.coins >= price;
+
+        uiButton({ id: 'equip_' + item.id, x: x, y: ry, w: w - upW - 4, h: 30,
+          onClick: function () { toggleTomeEquip(idx); },
+          draw: function (b, hot) {
+            var fill = hot ? UI.panelHi : (equipped ? hexToRgba(item.color, 0.10) : 'rgba(14,14,27,0.95)');
+            drawPanel(b.x, b.y, b.w, b.h, { fill: fill, border: hot ? UI.gold : (equipped ? item.color : UI.line) });
+            if (equipped || hot) { ctx.fillStyle = hot ? UI.gold : item.color; ctx.fillRect(b.x + 1, b.y + 2, 2, b.h - 4); }
+            drawTomeIcon(item.color, b.x + 10, b.y + 8, 14);
+            text(item.name, b.x + 32, b.y + 6, 8, lvl > 0 ? UI.text : UI.muted);
+            text(item.desc, b.x + 32, b.y + 18, 6, UI.muted);
+            var px = b.x + 194;
+            for (var pip = 0; pip < 5; pip++) {
+              ctx.fillStyle = pip < lvl ? item.color : '#26263a';
+              ctx.fillRect(px + pip * 10, b.y + 7, 8, 6);
+            }
+            text('LV ' + lvl + '/5', px, b.y + 18, 6, UI.dim);
+            var xr = b.x + b.w - 8;
+            if (equipped) {
+              text('EQUIPPED', xr, b.y + 12, 6, UI.green, 'right');
+              drawIcon('check', xr - measureText('EQUIPPED', 6) - 12, b.y + 10, UI.green);
+            } else if (lvl < 1) {
+              text('NOT OWNED', xr, b.y + 12, 6, UI.dim, 'right');
+            } else {
+              text('EQUIP', xr, b.y + 12, 6, hot ? '#ffffff' : UI.muted, 'right');
+            }
+          } });
+
+        uiButton({ id: 'buy_' + item.id, x: x + w - upW, y: ry, w: upW, h: 30,
+          onClick: function () { tryBuyShopItem(idx); },
+          draw: function (b, hot) {
+            var border = hot ? UI.gold : (maxed ? '#2f6b47' : (affordable ? UI.goldDim : '#4a2626'));
+            drawPanel(b.x, b.y, b.w, b.h, { fill: hot ? UI.goldFillHi : (affordable ? UI.goldFill : 'rgba(14,14,27,0.95)'), border: border });
+            if (maxed) {
+              text('MAXED', b.x + b.w / 2, b.y + 11, 8, UI.green, 'center');
+            } else {
+              text(lvl === 0 ? 'BUY' : 'UPGRADE', b.x + b.w / 2, b.y + 6, 6, UI.muted, 'center');
+              drawCoinAmount(b.x + b.w / 2, b.y + 17, price, 'center', 8, affordable ? UI.gold : '#c05050');
+            }
+          } });
+      })(SHOP_ITEMS[i], i, 62 + i * 34);
+    }
+    drawHints([['ENTER', 'EQUIP / BUY'], ['1-5', 'QUICK BUY'], ['ESC', 'BACK']], 'TAP A TOME TO EQUIP - TAP THE PRICE TO BUY');
   }
 
   // ---------------------------------------------------------------------------
   // WARDROBE — hero skin gallery (cosmetics, separate from The Vault's power)
   // ---------------------------------------------------------------------------
-  function skinCardRect(i) {
-    return { x: 24 - wardrobeScroll + i * 146, y: 86, w: 134, h: 152 };
-  }
-  function wardrobeContentW() { return (SKINS[wardrobeClass] || []).length * 146 - 12; }
-  function wardrobeMaxScroll() { return Math.max(0, wardrobeContentW() - (W - 48)); }
-
   // draw a class hero sprite with a skin applied, at (x,y,size)
   function drawSkinPreview(classId, skin, x, y, size) {
     if (classId === 'bombardier') {
@@ -5624,172 +6077,190 @@
     }
   }
 
-  function drawSkinCard(skin, r) {
-    if (r.x + r.w < 0 || r.x > W) return; // scrolled off-screen
+  function skinAccent(skin) {
+    return skin.tier === 'epic' ? (skin.chroma ? chromaColor() : '#ffd24a')
+         : (skin.tier === 'basic' ? '#54a0ff' : '#8890a0');
+  }
+
+  function drawSkinCard(b, hot) {
+    var skin = b.skin;
     var owned = skinOwned(skin.id);
     var equipped = equippedSkinId(wardrobeClass) === skin.id;
     var pending = skinPending === skin.id;
     var locked = skin.tier === 'epic' && !epicUnlocked();
-    var hover = mouse.x >= r.x && mouse.x <= r.x + r.w && mouse.y >= r.y && mouse.y <= r.y + r.h;
-    var accent = skin.tier === 'epic' ? (skin.chroma ? chromaColor() : '#ffd24a')
-                : (skin.tier === 'basic' ? '#54a0ff' : '#8890a0');
-
-    ctx.fillStyle = equipped ? '#33cc66' : (hover ? '#FFD700' : accent);
-    ctx.fillRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
-    ctx.fillStyle = '#101018';
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-
-    // tier ribbon
+    var accent = skinAccent(skin);
+    var x = b.x, w = b.w, h = b.h, y = b.y - (hot ? 3 : 0);
+    if (hot) {
+      ctx.fillStyle = 'rgba(255,215,0,0.2)';
+      ctx.fillRect(x - 3, y - 3, w + 6, h + 6);
+    }
+    drawPanel(x, y, w, h, { fill: hot ? '#17172c' : 'rgba(14,14,27,0.95)', border: equipped ? UI.green : (hot ? UI.gold : accent) });
     ctx.fillStyle = accent;
-    ctx.fillRect(r.x, r.y, r.w, 12);
-    text(skin.tier.toUpperCase(), r.x + r.w / 2, r.y + 3, 6, '#101018', 'center');
+    ctx.fillRect(x + 1, y + 1, w - 2, 12);
+    text(skin.tier.toUpperCase(), x + w / 2, y + 4, 6, '#101018', 'center');
 
-    // preview sprite (dimmed if locked)
     if (locked) ctx.globalAlpha = 0.35;
-    drawSkinPreview(wardrobeClass, skin, r.x + r.w / 2 - 24, r.y + 22, 48);
+    drawSkinPreview(wardrobeClass, skin, Math.round(x + w / 2 - 24), y + 24, 48);
     ctx.globalAlpha = 1;
 
-    text(skin.name, r.x + r.w / 2, r.y + 78, 6, '#ffffff', 'center');
+    text(skin.name, x + w / 2, y + 82, 8, '#ffffff', 'center');
 
-    // status line
+    var cy = y + 112;
     if (equipped) {
-      text('EQUIPPED', r.x + r.w / 2, r.y + 116, 6, '#33cc66', 'center');
+      var ew = measureText('EQUIPPED', 8) + 12;
+      drawIcon('check', x + w / 2 - ew / 2, cy - 1, UI.green);
+      text('EQUIPPED', x + w / 2 + 6, cy, 8, UI.green, 'center');
     } else if (owned) {
-      text('TAP TO EQUIP', r.x + r.w / 2, r.y + 116, 6, '#aaaaaa', 'center');
+      text('OWNED', x + w / 2, cy - 6, 6, UI.dim, 'center');
+      text('EQUIP', x + w / 2, cy + 6, 8, hot ? '#ffffff' : UI.muted, 'center');
     } else if (locked) {
-      text('LOCKED', r.x + r.w / 2, r.y + 110, 6, '#ff5555', 'center');
-      text('REACH W' + EPIC_SKIN_WAVE, r.x + r.w / 2, r.y + 122, 6, '#ff8888', 'center');
+      drawIcon('lock', x + w / 2 - 4, cy - 8, UI.red);
+      text('REACH WAVE ' + EPIC_SKIN_WAVE, x + w / 2, cy + 6, 6, '#ff8888', 'center');
     } else {
       var aff = runData.coins >= skin.price;
-      if (pending) text('TAP TO BUY', r.x + r.w / 2, r.y + 104, 6, '#33cc66', 'center');
-      text(skin.price + 'c', r.x + r.w / 2, r.y + (pending ? 118 : 112), 8, aff ? '#FFD700' : '#883333', 'center');
+      if (pending) text('TAP AGAIN TO BUY', x + w / 2, cy - 8, 6, UI.green, 'center');
+      drawCoinAmount(x + w / 2, cy + (pending ? 4 : 0), skin.price, 'center', 10, aff ? UI.gold : '#c05050');
     }
   }
 
   function renderWardrobe() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
-    text('SKINS', W / 2, 10, 10, '#FFD700', 'center');
-    drawCoinBalance(W / 2, 30);
+    drawMenuBackdrop(0.86);
+    drawHeader('SKINS', 'COSMETIC ONLY - NO GAMEPLAY EFFECT');
+    drawWallet();
 
-    // character selector
-    var tabW = 88, gap = 5, total = CLASSES.length * tabW + (CLASSES.length - 1) * gap;
-    var tx0 = (W - total) / 2;
+    // character tabs, aligned with the class-select card grid
+    var tabW = 84, gap = 6, tx0 = Math.round(W / 2 - (CLASSES.length * tabW + (CLASSES.length - 1) * gap) / 2);
     for (var ci = 0; ci < CLASSES.length; ci++) {
-      var cls = CLASSES[ci];
-      var tx = tx0 + ci * (tabW + gap), ty = 44, th = 20;
-      var active = wardrobeClass === cls.id;
-      var hov = mouse.x >= tx && mouse.x <= tx + tabW && mouse.y >= ty && mouse.y <= ty + th;
-      ctx.fillStyle = active ? '#2a2a3e' : (hov ? '#1a1a26' : '#101018');
-      ctx.fillRect(tx, ty, tabW, th);
-      ctx.fillStyle = active ? cls.color : '#333344';
-      ctx.fillRect(tx, ty + th - 1, tabW, 1);
-      text(cls.name, tx + tabW / 2, ty + 7, 6, active ? '#ffffff' : '#888888', 'center');
+      (function (cls, tx) {
+        uiButton({ id: 'tab_' + cls.id, x: tx, y: 44, w: tabW, h: 22,
+          onClick: function () { wardrobeClass = cls.id; wardrobeScroll = 0; skinPending = null; },
+          draw: function (b, hot) {
+            var active = wardrobeClass === cls.id;
+            drawPanel(b.x, b.y, b.w, b.h, { fill: active ? UI.panelHi : (hot ? UI.panel2 : 'rgba(14,14,27,0.92)'),
+              border: hot ? UI.gold : (active ? cls.color : UI.line) });
+            if (active) { ctx.fillStyle = cls.color; ctx.fillRect(b.x + 1, b.y + b.h - 3, b.w - 2, 2); }
+            drawHeroIcon(cls.id, b.x + 5, b.y + 4, 13);
+            text(cls.name, b.x + 22, b.y + 8, 6, active ? '#ffffff' : (hot ? UI.text : UI.muted));
+          } });
+      })(CLASSES[ci], tx0 + ci * (tabW + gap));
     }
 
     var list = SKINS[wardrobeClass] || [];
-    for (var i = 0; i < list.length; i++) drawSkinCard(list[i], skinCardRect(i));
-
-    // scroll arrows when the cards overflow
-    if (wardrobeMaxScroll() > 0) {
-      if (wardrobeScroll > 4) text('<', 12, 156, 10, '#FFD700');
-      if (wardrobeScroll < wardrobeMaxScroll() - 4) text('>', W - 18, 156, 10, '#FFD700');
+    var n = list.length, cgap = 12;
+    var cw = Math.min(140, Math.floor((W - 36 - (n - 1) * cgap) / Math.max(1, n)));
+    var cx0 = Math.round(W / 2 - (n * cw + (n - 1) * cgap) / 2);
+    for (var i = 0; i < n; i++) {
+      (function (skin, sx) {
+        uiButton({ id: 'skin_' + skin.id, x: sx, y: 78, w: cw, h: 150, skin: skin,
+          isDefault: equippedSkinId(wardrobeClass) === skin.id,
+          onClick: function () { selectSkin(wardrobeClass, skin.id); },
+          draw: drawSkinCard });
+      })(list[i], cx0 + i * (cw + cgap));
     }
-    text('TAP CARD = EQUIP / BUY    ESC = BACK', W / 2, 252, 6, '#888888', 'center');
+    drawHints([['Q / E', 'CLASS'], ['ENTER', 'EQUIP / BUY'], ['ESC', 'BACK']], 'TAP A SKIN TO EQUIP OR BUY');
+  }
+
+  // ----- RECIPE CODEX -----
+  var CODEX_TIPS = [
+    'DMG BOOST FEEDS TWO RECIPES - THE SAFEST EARLY PICK',
+    'FROST + FAST FIRE = A PERMANENT SLOW FIELD',
+    'CURSES HIT HARDER THE EARLIER YOU TAKE THEM',
+    'EVOLUTIONS SKIP THE QUEUE - THEY ARE ALWAYS CARD ONE',
+    'HOMING FEEDS TWO RECIPES TOO - PAIR IT WITH SHOTGUN OR CRIT'
+  ];
+  function upgradeById(id) {
+    for (var i = 0; i < UPGRADES.length; i++) if (UPGRADES[i].id === id) return UPGRADES[i];
+    return null;
+  }
+  function drawRecipeChip(id, name, color, x, y, w, h, evo) {
+    drawPanel(x, y, w, h, { fill: evo ? '#1c0f19' : '#0b0b16', border: evo ? '#a8338f' : hexToRgba(color, 0.55), flat: true });
+    var art = CARD_ART[id];
+    if (art) drawPixelIcon(art, x + 4, y + Math.round((h - 12) / 2), 1);
+    else { ctx.fillStyle = color; ctx.fillRect(x + 5, y + Math.round((h - 10) / 2), 10, 10); }
+    text(name, x + 20, y + Math.round((h - 6) / 2), 6, evo ? '#ff8fe6' : UI.text);
   }
 
   function renderCodex() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
+    drawMenuBackdrop(0.86);
+    drawHeader('RECIPE CODEX', 'OWN BOTH CARDS AND THE EVOLUTION IS OFFERED NEXT LEVEL');
 
-    text('RECIPE CODEX', W / 2, 12, 10, '#FFD700', 'center');
-    text('STANDARD: FAIR TRADE', 100, 34, 6, '#FFD700', 'center');
-    text('CURSED: RUN PAYS', 245, 34, 6, '#9b59b6', 'center');
-    text('EVOLUTION: COMBO', 378, 34, 6, '#ff2dd0', 'center');
-
-    var recipes = [
-      ['SHOTGUN', 'HOMING SHOT', 'SEEKER SWARM'],
-      ['ORBIT SHIELD', 'DMG BOOST', 'BLADE ORBIT'],
-      ['PIERCE', 'DMG BOOST', 'RAILGUN'],
-      ['MULTI-SHOT', 'ATTACK SPD', 'BULLET STORM'],
-      ['KEEN EDGE', 'HOMING SHOT', 'DEATHSEEKER']
-    ];
-    var evoIds = ['seekerswarm', 'bladeorbit', 'railgun', 'bulletstorm', 'deathseeker'];
-    for (var i = 0; i < recipes.length; i++) {
-      var ry = 50 + i * 27;
-      var owned = game.player && game.player.upgradesTaken && game.player.upgradesTaken[evoIds[i]];
-      // ingredient boxes
-      ctx.fillStyle = '#8a7500';
-      ctx.fillRect(23, ry - 1, 110, 20);
-      ctx.fillStyle = '#0d0d1a';
-      ctx.fillRect(24, ry, 108, 18);
-      text(recipes[i][0], 78, ry + 6, 6, '#FFD700', 'center');
-      text('+', 146, ry + 6, 8, '#ffffff', 'center');
-      ctx.fillStyle = '#8a7500';
-      ctx.fillRect(159, ry - 1, 110, 20);
-      ctx.fillStyle = '#0d0d1a';
-      ctx.fillRect(160, ry, 108, 18);
-      text(recipes[i][1], 214, ry + 6, 6, '#FFD700', 'center');
-      text('=', 282, ry + 6, 8, '#ffffff', 'center');
-      ctx.fillStyle = '#ff2dd0';
-      ctx.fillRect(295, ry - 1, 162, 20);
-      ctx.fillStyle = '#1f1018';
-      ctx.fillRect(296, ry, 160, 18);
-      text(recipes[i][2] + (owned ? ' *' : ''), 376, ry + 6, 6, '#ff2dd0', 'center');
+    // legend
+    var leg = [['STANDARD', 'FAIR TRADE', '#FFD700'], ['CURSED', 'BOOST + COST', '#b77fe0'], ['EVOLUTION', 'COMBO', UI.pink]];
+    var lw = 0, li;
+    for (li = 0; li < leg.length; li++) lw += 8 + measureText(leg[li][0] + ': ' + leg[li][1], 6) + (li ? 14 : 0);
+    var lx = Math.round(W / 2 - lw / 2);
+    for (li = 0; li < leg.length; li++) {
+      ctx.fillStyle = leg[li][2];
+      ctx.fillRect(lx, 45, 5, 5);
+      text(leg[li][0] + ':', lx + 8, 45, 6, leg[li][2]);
+      text(leg[li][1], lx + 8 + measureText(leg[li][0] + ': ', 6), 45, 6, UI.muted);
+      lx += 8 + measureText(leg[li][0] + ': ' + leg[li][1], 6) + 14;
     }
-    text('OWN BOTH CARDS AND THE EVOLUTION IS GUARANTEED IN YOUR NEXT DRAFT', W / 2, 186, 6, '#bbbbbb', 'center');
 
-    text('TIPS', W / 2, 204, 6, '#FFD700', 'center');
-    text('DMG BOOST FEEDS TWO RECIPES — SAFEST EARLY PICK', W / 2, 216, 6, '#888888', 'center');
-    text('FROST + FAST FIRE = A PERMANENT SLOW FIELD', W / 2, 227, 6, '#888888', 'center');
-    text('CURSES HIT HARDER THE EARLIER YOU TAKE THEM', W / 2, 238, 6, '#888888', 'center');
+    var x = 24, w = 432, rh = 22;
+    for (var i = 0; i < EVOLUTIONS.length; i++) {
+      (function (evo, ry) {
+        var a = upgradeById(evo.needs[0]) || { name: evo.needs[0], color: '#888' };
+        var b2 = upgradeById(evo.needs[1]) || { name: evo.needs[1], color: '#888' };
+        uiButton({ id: 'recipe_' + evo.id, x: x, y: ry, w: w, h: rh, evo: evo, onClick: function () {},
+          draw: function (b, hot) {
+            drawPanel(b.x, b.y, b.w, b.h, { fill: hot ? UI.panelHi : 'rgba(14,14,27,0.92)', border: hot ? UI.gold : UI.line });
+            drawRecipeChip(evo.needs[0], a.name, a.color, b.x + 4, b.y + 3, 124, rh - 6, false);
+            text('+', b.x + 138, b.y + 7, 8, UI.muted, 'center');
+            drawRecipeChip(evo.needs[1], b2.name, b2.color, b.x + 148, b.y + 3, 124, rh - 6, false);
+            text('=', b.x + 282, b.y + 7, 8, UI.muted, 'center');
+            drawRecipeChip(evo.id, evo.name, evo.color, b.x + 292, b.y + 3, b.w - 296, rh - 6, true);
+          } });
+      })(EVOLUTIONS[i], 58 + i * 25);
+    }
 
-    text('ESC / ENTER / R TO RETURN', W / 2, 256, 6, '#666666', 'center');
+    // details for the focused recipe
+    var f = uiFocused();
+    var evo = (f && f.evo) || EVOLUTIONS[0];
+    var dy = 186;
+    drawPanel(x, dy, w, 34, { fill: 'rgba(14,14,27,0.95)', accent: UI.pink });
+    text(evo.name, x + 10, dy + 8, 8, UI.pink);
+    text('NEEDS ' + evo.detail, x + w - 10, dy + 9, 6, UI.muted, 'right');
+    text(evo.desc.toUpperCase(), x + 10, dy + 21, 6, UI.text);
+    text('BUT: ' + evo.con, x + w - 10, dy + 21, 6, '#ff6b6b', 'right');
+
+    var tip = CODEX_TIPS[Math.floor(game.time / 5) % CODEX_TIPS.length];
+    text('TIP: ' + tip, W / 2, 228, 6, UI.dim, 'center');
+    drawHints([['ARROWS', 'BROWSE'], ['ESC', 'BACK']], 'TAP A RECIPE FOR DETAILS');
   }
 
-  // Post-first-death nudge: ratings on itch are what make the game visible.
-  var FEEDBACK_BTNS = [
-    { id: 'rate',  label: 'RATE IT ON ITCH.IO', x: 150, y: 150, w: 180, h: 24, gold: true },
-    { id: 'later', label: 'MAYBE LATER',        x: 150, y: 184, w: 180, h: 20 }
-  ];
-
+  // ----- FEEDBACK (post-first-death nudge: itch ratings make the game visible) -----
   function renderFeedback() {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    drawAnimatedScanlines(0.05);
-
-    text('ENJOYING KRYPTVAULT?', W / 2, 60, 10, '#FFD700', 'center');
-    text('RATINGS AND COMMENTS ON ITCH ARE WHAT', W / 2, 92, 6, '#bbbbbb', 'center');
-    text('MAKE A TINY FREE GAME VISIBLE TO OTHERS', W / 2, 104, 6, '#bbbbbb', 'center');
-    text('IT TAKES 20 SECONDS AND HELPS A TON', W / 2, 122, 6, '#888888', 'center');
-
-    for (var i = 0; i < FEEDBACK_BTNS.length; i++) {
-      var b = FEEDBACK_BTNS[i];
-      var hover = mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h;
-      ctx.fillStyle = hover ? '#FFD700' : (b.gold ? '#8a7500' : '#444466');
-      ctx.fillRect(b.x - 1, b.y - 1, b.w + 2, b.h + 2);
-      ctx.fillStyle = hover ? '#1f1a08' : '#0d0d1a';
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-      text(b.label, b.x + b.w / 2, b.y + (b.h - (b.gold ? 8 : 6)) / 2, b.gold ? 8 : 6,
-           b.gold ? '#FFD700' : '#cccccc', 'center');
-    }
-    text('ENTER OPENS ITCH — ESC SKIPS', W / 2, 226, 6, '#555566', 'center');
+    drawMenuBackdrop(0.86);
+    drawHeader('ENJOYING KRYPTVAULT?', null);
+    drawPanel(80, 50, 320, 66, { fill: 'rgba(14,14,27,0.96)' });
+    text('RATINGS AND COMMENTS ON ITCH.IO', W / 2, 62, 8, UI.text, 'center');
+    text('ARE WHAT MAKE A FREE GAME VISIBLE', W / 2, 76, 8, UI.text, 'center');
+    text('IT TAKES 20 SECONDS AND HELPS A TON', W / 2, 96, 6, UI.muted, 'center');
+    uiButton({ id: 'rate', x: 140, y: 128, w: 200, h: 26, kind: 'primary', icon: 'star', label: 'RATE IT ON ITCH.IO',
+      align: 'center', isDefault: true, onClick: function () {
+        window.open(ITCH_URL, '_blank');
+        game.gameState = 'title';
+        maybeRefreshLeaderboard();
+      } });
+    uiButton({ id: 'later', x: 140, y: 160, w: 200, h: 22, label: 'MAYBE LATER', align: 'center',
+      onClick: function () { game.gameState = 'title'; maybeRefreshLeaderboard(); } });
+    drawHints([['ENTER', 'SELECT'], ['ESC', 'SKIP']]);
   }
 
   // Toast popups, drawn over every screen.
   function drawToasts() {
+    var y0 = game.gameState === 'title' ? 54 : 40;
     for (var i = 0; i < game.toasts.length; i++) {
       var t = game.toasts[i];
-      var alpha = t.t < 0.3 ? t.t / 0.3 : (t.t > 2.4 ? Math.max(0, 1 - (t.t - 2.4) / 0.6) : 1);
+      var alpha = t.t < 0.25 ? t.t / 0.25 : (t.t > 2.4 ? Math.max(0, 1 - (t.t - 2.4) / 0.6) : 1);
       ctx.globalAlpha = alpha;
-      var tw = 220, tx = (W - tw) / 2, ty = 30 + i * 20;
-      ctx.fillStyle = '#FFD700';
-      ctx.fillRect(tx - 1, ty - 1, tw + 2, 16);
-      ctx.fillStyle = '#1a1408';
-      ctx.fillRect(tx, ty, tw, 14);
-      text(t.txt, W / 2, ty + 4, 6, '#FFD700', 'center');
+      var tw = Math.min(W - 20, Math.ceil(measureText(t.txt, 8)) + 22);
+      var tx = Math.round((W - tw) / 2), ty = y0 + i * 19;
+      drawPanel(tx, ty, tw, 16, { fill: '#1d1806', border: UI.goldDim });
+      ctx.fillStyle = UI.gold;
+      ctx.fillRect(tx + 1, ty + 2, 2, 12);
+      text(t.txt, W / 2, ty + 4, 8, UI.gold, 'center');
       ctx.globalAlpha = 1;
     }
   }
@@ -5802,33 +6273,30 @@
     ctx.fillRect(0, 0, W, H);
 
     var cw = 240, ch = 100, cx = (W - cw) / 2, cy = (H - ch) / 2;
-    ctx.fillStyle = '#FFD700';                 // 2px gold border
-    ctx.fillRect(cx - 2, cy - 2, cw + 4, ch + 4);
-    ctx.fillStyle = '#0d0d1a';                 // dark background
-    ctx.fillRect(cx, cy, cw, ch);
+    drawPanel(cx, cy, cw, ch, { fill: 'rgba(13,13,26,0.97)', border: UI.gold, accent: UI.gold });
 
-    text('WAVE', W / 2, cy + 12, 8, '#FFD700', 'center');
-    text(pad(game.wave, 2), W / 2, cy + 28, 20, '#FFD700', 'center');
+    text('WAVE', W / 2, cy + 12, 8, UI.gold, 'center');
+    drawTitleText(pad(game.wave, 2), W / 2, cy + 26, 24, UI.gold, '#6b3a00');
 
     if (game.bossWave) {
       if (game.blinkOn) {
-        text('! BOSS WAVE !', W / 2, cy + 68, 8, '#ff2d2d', 'center');
+        text('! BOSS WAVE !', W / 2, cy + 64, 8, '#ff4d4d', 'center');
       }
       // tease the incoming boss by name (kind rotation is deterministic)
       var upKind = BOSS_KINDS[(Math.round(game.wave / 10) - 1 + 300) % 3];
-      text(BOSS_DEFS[upKind].name, W / 2, cy + 84, 6, BOSS_DEFS[upKind].color, 'center');
+      text(BOSS_DEFS[upKind].name, W / 2, cy + 80, 6, BOSS_DEFS[upKind].color, 'center');
     } else {
-      text('~' + game.waveTarget + ' ENEMIES', W / 2, cy + 68, 6, '#ffffff', 'center');
+      text('~' + game.waveTarget + ' ENEMIES', W / 2, cy + 64, 8, '#ffffff', 'center');
       // announce the biome on the first wave after each boss (11, 21, 31...)
       if (game.wave > 10 && game.wave % 10 === 1) {
-        text('ENTERING ' + currentBiome().name, W / 2, cy + 84, 6, '#ffb347', 'center');
+        text('ENTERING ' + currentBiome().name, W / 2, cy + 80, 6, '#ffb347', 'center');
       }
     }
   }
 
   // simple word-wrap renderer centred at cx
   function wrapText(str, cx, y, size, color, maxW) {
-    ctx.font = size + 'px "Press Start 2P"';
+    ctx.font = size + 'px "Press Start 2P", monospace';
     var words = str.split(' ');
     var lines = [];
     var line = '';
@@ -5845,12 +6313,15 @@
     for (var l = 0; l < lines.length; l++) {
       text(lines[l], cx, y + l * (size + 3), size, color, 'center');
     }
+    return lines.length;
   }
 
   // ---------------------------------------------------------------------------
   // MAIN RENDER
   // ---------------------------------------------------------------------------
   function render() {
+    // every frame starts from the logical 480x270 space scaled up by RS
+    ctx.setTransform(RS, 0, 0, RS, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
@@ -5863,68 +6334,33 @@
       loginInput.blur();
     }
 
-    if (game.gameState === 'title') {
-      renderTitle();
-    } else if (game.gameState === 'nameentry') {
-      renderNameEntry();
-      drawScanlines();
-    } else if (game.gameState === 'settings') {
-      renderSettings();
-      drawScanlines();
-    } else if (game.gameState === 'account') {
-      renderAccount();
-      drawScanlines();
-    } else if (game.gameState === 'login') {
-      renderLogin();
-      drawScanlines();
-    } else if (game.gameState === 'accountinfo') {
-      renderAccountInfo();
-      drawScanlines();
-    } else if (game.gameState === 'classselect') {
-      renderClassSelect();
-      drawScanlines();
-    } else if (game.gameState === 'shop') {
-      renderShop();
-      drawScanlines();
-    } else if (game.gameState === 'wardrobe') {
-      renderWardrobe();
-      drawScanlines();
-    } else if (game.gameState === 'codex') {
-      renderCodex();
-      drawScanlines();
-    } else if (game.gameState === 'feedback') {
-      renderFeedback();
-      drawScanlines();
-    } else if (game.gameState === 'gameover') {
-      renderGameOver();
-      drawScanlines();
-    } else if (game.gameState === 'levelup') {
-      renderLevelUp();
-      drawScanlines();
-    } else if (game.gameState === 'ascend') {
-      renderAscend();
-      drawScanlines();
-    } else if (game.gameState === 'waveintro') {
-      renderWaveIntro();
-      drawScanlines();
-    } else if (game.gameState === 'paused') {
+    uiBegin();
+    var s = game.gameState;
+    if (s === 'title') renderTitle();
+    else if (s === 'nameentry') renderNameEntry();
+    else if (s === 'settings') renderSettings();
+    else if (s === 'account') renderAccount();
+    else if (s === 'login') renderLogin();
+    else if (s === 'accountinfo') renderAccountInfo();
+    else if (s === 'classselect') renderClassSelect();
+    else if (s === 'shop') renderShop();
+    else if (s === 'wardrobe') renderWardrobe();
+    else if (s === 'codex') renderCodex();
+    else if (s === 'feedback') renderFeedback();
+    else if (s === 'gameover') renderGameOver();
+    else if (s === 'levelup') renderLevelUp();
+    else if (s === 'ascend') renderAscend();
+    else if (s === 'waveintro') renderWaveIntro();
+    else if (s === 'paused') renderPaused();
+    else {
       renderWorld();
       renderHUD();
-      ctx.fillStyle = 'rgba(0,0,10,0.65)';
-      ctx.fillRect(0, 0, W, H);
-      text('PAUSED', W / 2, 105, 16, '#FFD700', 'center');
-      if (game.blinkOn) {
-        text('P / ESC / CLICK TO RESUME', W / 2, 140, 6, '#bbbbbb', 'center');
-      }
-      drawScanlines();
-    } else {
-      renderWorld();
-      renderHUD();
-      drawScanlines();
     }
+    if (s !== 'title' && s !== 'gameover') drawScanlines();
 
-    // shared back button on every menu screen (class-select has its own below the cards)
-    if (BACK_STATES[game.gameState]) drawBackButton();
+    // shared back button on every menu screen
+    if (BACK_STATES[s]) drawBackButton();
+    uiEnd();
 
     // boss-death white flash, drawn on top of everything for a few frames
     if (game.whiteFlash > 0) {
@@ -5951,6 +6387,7 @@
     var dt = (ts - lastTime) / 1000;
     lastTime = ts;
     if (dt > 0.05) dt = 0.05; // cap to avoid spiral of death
+    frameDt = dt;
     update(dt);
     render();
     requestAnimationFrame(loop);

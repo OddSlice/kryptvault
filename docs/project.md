@@ -89,7 +89,10 @@ above. Every fix was reproduced by a test on the old build first.
 - **Server:** `db/update-2026-10-16.sql` lets Ranger and Bombardier scores in
   (the database rejected every one of them) and lifts the wave-300 cap. **It
   has to be run once in the Neon SQL editor.** The board shows each player's
-  best run.
+  best run. A score only carries a tag (MAR#1234) when it comes with that
+  account's vault key; without one it still counts, untagged. Login attempts
+  aren't rate-limited yet: guessing a 32-bit key over the network would take
+  years, and a proper limit needs Vercel's paid firewall or a new table.
 - **Looks:** checked with the real font. The damage legend, the HP orb, the coin
   labels and the equipped Vault rows no longer overflow.
 - **Speed:** tinted monsters are coloured once instead of every frame.

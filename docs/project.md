@@ -70,7 +70,8 @@ opens.
 
 - `og.png` (1200x630) is the picture link previews show (Discord, X, WhatsApp
   and so on). The `og:` and `twitter:` tags at the top of `index.html` point to it.
-- `promo/` is the promo kit: the trailer, the 1920x1080 images, a copy of
+- `promo/` is the promo kit: the trailer, the 1920x1080 images, the itch.io
+  set (cover, banner, wide cover, background tile, HUD screenshots), a copy of
   the link-preview image and the 1.1/1.2 changelog, with a `README.txt` saying
   what each file is. It isn't deployed.
 - `tools/promo/` rebuilds them all from the real game (needs Playwright):

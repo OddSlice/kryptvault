@@ -5,7 +5,10 @@
 //   node tools/promo/scenes.cjs index.html /tmp/kv/scenes/og 1200x675 scene-keyart   (og.png's scene)
 // A scene's picture depends on the scenes rendered before it in the same run, so
 // the promo images were made one scene at a time: pass the scene name
-// (or "portraits" for the hero portraits alone).
+// (or "portraits" for the hero portraits alone, "shots" for the itch.io
+// screenshots: the full game frame with its HUD). Add "-wide" to a scene name
+// (scene-keyart-wide) for the same scene showing the whole arena, unzoomed:
+// the itch.io cover, banner and wide cover crop from those.
 let chromium;
 try { ({ chromium } = require('playwright')); } catch (e) { ({ chromium } = require('/opt/node-tools/node_modules/playwright')); }
 const fs = require('fs');
@@ -17,11 +20,11 @@ fs.mkdirSync(OUT, { recursive: true });
 // set KV_FONT_DIR to a folder holding Google's ps2p.css and its .woff2 files.
 const FONT = process.env.KV_FONT_DIR ? path.resolve(process.env.KV_FONT_DIR) + '/' : null;
 let html = fs.readFileSync(SRC, 'utf8');
-html = html.replace('function drawEnemyHpBar(e) {', 'function drawEnemyHpBar(e) { if (!e.elite && e.hp >= e.maxHp) return;');
+html = html.replace('function drawEnemyHpBar(e) {', 'function drawEnemyHpBar(e) { if (window.__cleanBars && !e.elite && e.hp >= e.maxHp) return;');
 const cut = html.lastIndexOf('})();');
 html = html.slice(0, cut) + `window.__kv = { game: game, runData: runData, startGame: startGame, beginWave: beginWave, spawnEnemyAt: spawnEnemyAt,
   enemyTypeForWave: enemyTypeForWave, applyUpgrade: applyUpgrade, applyAscendancy: applyAscendancy, ASCENDANCIES: ASCENDANCIES, castAbility: castAbility,
-  update: update, renderWorld: renderWorld, drawHeroIcon: drawHeroIcon, boxHitsWall: boxHitsWall, CLASSES: CLASSES, setMuted: function (m, s) { musicMuted = m; sfxMuted = s; },
+  update: update, renderWorld: renderWorld, render: render, triggerLevelUp: triggerLevelUp, enterClassSelect: enterClassSelect, drawHeroIcon: drawHeroIcon, boxHitsWall: boxHitsWall, CLASSES: CLASSES, setMuted: function (m, s) { musicMuted = m; sfxMuted = s; },
   setClass: function (id) { currentClass = id; }, ctx: function () { return ctx; } };\n` + html.slice(cut);
 
 (async () => {
@@ -45,11 +48,14 @@ html = html.slice(0, cut) + `window.__kv = { game: game, runData: runData, start
   await page.evaluate(() => { __kv.setMuted(true, true); __kv.runData.name = 'YOU'; });
 
   // step the simulation (world only), then draw just the world at 1920x1080
+  const WIDE = !!ONLY && ONLY.endsWith('-wide');
   const shoot = async (name, setup, steps, keep, view) => {
-    if (ONLY && name !== ONLY) return;
-    view = view || { x: 0, y: 0, z: 1 };
+    if (ONLY && name !== ONLY && !(WIDE && name + '-wide' === ONLY)) return;
+    view = WIDE ? { x: 0, y: 0, z: 1 } : (view || { x: 0, y: 0, z: 1 });
+    if (WIDE) name += '-wide';
     await page.evaluate(({ setup, steps, keep, view }) => {
       var kv = __kv, g = kv.game;
+      window.__cleanBars = true;
       (new Function('kv', 'g', setup))(kv, g);
       for (var k = 0; k < steps; k++) {
         g.spawnTimer = 999; g.hitStop = 0;
@@ -116,6 +122,48 @@ html = html.slice(0, cut) + `window.__kv = { game: game, runData: runData, start
     var p = g.player; p.x = 190; p.y = 150; p.attackTimer = 0;
     for (var k = 0; k < 14; k++) { var a = Math.random() * Math.PI * 2, r = 60 + Math.random() * 40; kv.spawnEnemyAt(kv.enemyTypeForWave(30), 240 + Math.cos(a) * r * 1.6, 135 + Math.sin(a) * r * 0.75); }
     window.__step = 0; ${freeze}`, 50, freeze + ' var b = kv.game.boss; window.__step++; if (b) { b.speed = 0; b.blinkTimer = 99; b.aiTimer = (window.__step === 20 || window.__step === 40) ? 0 : 99; }', { x: 120, y: 58, z: 2 });
+
+  // Real screenshots for the itch page: the whole game frame with its HUD,
+  // monsters moving, damage numbers showing. "shots" renders all of them.
+  const snap = async (name, setup, steps, after) => {
+    if (ONLY !== name && ONLY !== 'shots') return;
+    await page.evaluate(({ setup, steps, after }) => {
+      var kv = __kv, g = kv.game;
+      window.__cleanBars = false;
+      (new Function('kv', 'g', setup))(kv, g);
+      for (var k = 0; k < steps; k++) {
+        g.spawnTimer = 999; g.hitStop = 0;
+        var p = g.player; if (p) { p.hp = Math.max(p.hp, p.maxHp * 0.7); p.invuln = 0; }
+        kv.update(1 / 60);
+      }
+      if (after) (new Function('kv', 'g', after))(kv, g);
+      g.shakeTimer = 0; g.damageFlash = 0; g.whiteFlash = 0; g.waveBanner = 0; g.endlessBanner = 0;
+      g.enemies.forEach(function (e) { e.hitFlash = 0; });
+      kv.render();
+    }, { setup, steps, after: after || '' });
+    const data = await page.evaluate(() => document.querySelector('canvas').toDataURL('image/png'));
+    fs.writeFileSync(path.join(OUT, name + '.png'), Buffer.from(data.split(',')[1], 'base64'));
+    console.log('shot', name);
+  };
+  const hud = (level, kills, coins, mins) => `g.level = ${level}; g.score = ${kills}; g.coinsEarned = ${coins}; g.time = ${mins * 60}; g.xp = 0;`;
+  const around = (n, cx, cy, rmin, rmax, wave) => `for (var k = 0; k < ${n}; k++) { var a = Math.random() * Math.PI * 2, r = ${rmin} + Math.random() * ${rmax - rmin};
+    var x = ${cx} + Math.cos(a) * r * 1.5, y = ${cy} + Math.sin(a) * r * 0.85; if (x > 20 && x < 460 && y > 20 && y < 250 && !kv.boxHitsWall(x, y, 14, 14)) kv.spawnEnemyAt(kv.enemyTypeForWave(${wave}), x, y); }`;
+  await snap('shot-1-heroes', `kv.runData.classesOwned = { ranger: true, bombardier: true }; kv.runData.coins = 1840; kv.setClass('mage'); kv.enterClassSelect();`, 0);
+  const early = build('rogue', { multishot: 2, atkspeed: 1, crit: 1 }, [], 0).replace(/kv\.applyAscendancy\([^;]*\);/, '') + `
+    kv.beginWave(4); g.gameState = 'playing'; var p = g.player; p.x = 240; p.y = 140; p.attackTimer = 0; ${around(24, 240, 140, 70, 150, 4)} ${hud(7, 143, 96, 3.2)}`;
+  const healthy = 'var p = g.player; p.hp = Math.round(p.maxHp * 0.8);';
+  await snap('shot-2-catacombs', early, 20, healthy);
+  await snap('shot-3-levelup', early, 20, healthy + ' kv.triggerLevelUp(); g.draftLock = 0; g.cardFocus = 1;');
+  await snap('shot-4-warden', build('mage', { multishot: 2, damage: 3, atkspeed: 2, homing: 2, pierce: 1 }, [], 1) + `
+    kv.beginWave(40); g.gameState = 'playing'; var b = g.boss; b.x = 300; b.y = 110; b.entered = true;
+    var p = g.player; p.x = 170; p.y = 150; ${around(14, 240, 135, 70, 130, 40)} ${hud(46, 3120, 2650, 24.5)}`, 40, healthy);
+  await snap('shot-5-horde', build('warrior', { multishot: 5, atkspeed: 4, damage: 6, pierce: 3, static: 3, crit: 3, shield: 2 }, ['bulletstorm'], 1) + `
+    kv.beginWave(46); g.gameState = 'playing'; var p = g.player; p.x = 240; p.y = 140; ${around(110, 240, 140, 48, 150, 46)}
+    g.enemies.forEach(function (e) { e.speed = 0; e.maxHp = e.hp = 1e9; }); ${hud(64, 5210, 4870, 31)}`, 30,
+    healthy + ' g.enemies.forEach(function (e) { e.hp = e.maxHp; }); g.floatTexts = g.floatTexts.slice(-12);');
+  await snap('shot-6-keeper', build('bombardier', { multishot: 4, atkspeed: 3, damage: 4, crit: 2, shield: 2 }, ['bladeorbit'], 1) + `
+    kv.beginWave(50); g.gameState = 'playing'; var b = g.boss; b.x = 240; b.y = 80; b.entered = true;
+    var p = g.player; p.x = 240; p.y = 170; ${around(20, 240, 140, 70, 130, 50)} ${hud(71, 6040, 5920, 35)}`, 70, healthy);
 
   // E. hero portraits, transparent, 64px game-size each
   if (!ONLY || ONLY === 'portraits') for (const c of await page.evaluate(() => __kv.CLASSES.map(c => c.id))) {

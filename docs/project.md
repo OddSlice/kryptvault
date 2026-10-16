@@ -68,6 +68,19 @@ opens.
 
 ## What's been built (newest first)
 
+### v1.2.1: crash reports
+Any error the game catches (the safety net from v1.1, plus errors anywhere
+else in the game's own code) is sent to `/api/errors` and stored in the
+`error_reports` table. Each report holds the message, where in the code it
+happened, the game version, what the game was doing (screen, wave, level,
+hero, ascendancy), and the browser and window size. It never holds names,
+tags or vault keys. A visit sends at most 5 reports, each distinct error
+once. The server keeps at most 30 a minute and 20,000 in total.
+`db/update-2026-10-16-errors.sql` creates the table; run it once in Neon.
+To read them, paste this into the Neon SQL editor:
+
+    select created_at, ver, kind, msg, state, ua from public.error_reports order by id desc limit 50;
+
 ### v1.2: full sweep (game and server)
 A line-by-line review of the whole game and the server, plus the robots
 above. Every fix was reproduced by a test on the old build first.

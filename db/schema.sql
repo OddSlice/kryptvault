@@ -149,3 +149,20 @@ drop trigger if exists scores_validate on public.scores;
 create trigger scores_validate
 before insert on public.scores
 for each row execute function public.validate_score();
+
+-- ---------------------------------------------------------------------------
+-- crash reports from the game (api/errors.js); anonymous, capped in the API
+-- ---------------------------------------------------------------------------
+create table if not exists public.error_reports (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  ver text,
+  kind text,
+  msg text not null,
+  stack text,
+  state jsonb,
+  ua text,
+  screen text,
+  session text
+);
+create index if not exists error_reports_created_idx on public.error_reports (created_at);

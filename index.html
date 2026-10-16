@@ -40,8 +40,47 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '1.2';
+  var GAME_VERSION = '1.2.1';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
+
+  // ---------------------------------------------------------------------------
+  // CRASH REPORTS: errors the game catches are sent to /api/errors so a new bug
+  // shows up the same day instead of when a player mentions it. Anonymous:
+  // the error, version, device and what the game was doing; never names, tags
+  // or vault keys. At most 5 per visit, each distinct error once.
+  // ---------------------------------------------------------------------------
+  var reportSid = Math.random().toString(36).slice(2, 10);
+  var reportsSent = 0, reportSeen = {};
+  function reportError(err, kind) {
+    try {
+      if (reportsSent >= 5) return;
+      var msg = String((err && err.message) || err || 'unknown').slice(0, 300);
+      var stack = String((err && err.stack) || '').slice(0, 2000);
+      // page-level errors only when they come from the game itself (browser
+      // extensions and other scripts throw on this page too)
+      if (kind !== 'frame' && stack.indexOf(location.origin) === -1) return;
+      var where = (stack.split('\n')[1] || '').trim();
+      if (reportSeen[msg + where]) return;
+      reportSeen[msg + where] = true;
+      reportsSent++;
+      var st = null;
+      if (game) {
+        var pl = game.player || {};
+        st = { s: game.gameState, wave: game.wave, lvl: game.level, cls: currentClass,
+               asc: pl.ascendancy ? pl.ascendancy.id : null, en: (game.enemies || []).length, t: Math.round(game.time || 0) };
+      }
+      fetch('/api/errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
+        body: JSON.stringify({ v: GAME_VERSION, kind: kind, msg: msg, stack: stack, state: st,
+          ua: String(navigator.userAgent || '').slice(0, 300),
+          scr: window.innerWidth + 'x' + window.innerHeight + '@' + (window.devicePixelRatio || 1), sid: reportSid })
+      }).catch(function () {});
+    } catch (e) { /* reporting must never cause an error of its own */ }
+  }
+  window.addEventListener('error', function (e) { reportError(e.error || e.message, 'error'); });
+  window.addEventListener('unhandledrejection', function (e) { reportError(e.reason, 'promise'); });
 
   // ---------------------------------------------------------------------------
   // EMBEDDED SPRITESHEET (Kenney Tiny Dungeon, CC0) — base64 data URI.
@@ -6713,6 +6752,7 @@
   var frameErrors = 0;
   function frameError(err) {
     if (++frameErrors <= 5) console.error('KRYPTVAULT frame error:', err);
+    reportError(err, 'frame');
   }
   function loop(ts) {
     // book the next frame first and catch anything that throws: one bad frame

@@ -64,7 +64,11 @@ const sandbox = {
   setInterval, clearInterval, setTimeout, clearTimeout,
   localStorage: { _m: {}, getItem(k) { return this._m[k] ?? null; }, setItem(k, v) { this._m[k] = String(v); }, removeItem(k) { delete this._m[k]; } },
   fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve([]), text: () => Promise.resolve('') }),
-  performance, console, Math, JSON, Date, Image: function () { return { addEventListener: () => {}, style: {} }; },
+  performance, Math, JSON, Date,
+  // the game logs a frame that throws and keeps going; here it must fail loudly
+  console: { log: console.log, info: console.info, warn: console.warn,
+             error: (...a) => { throw a.find(x => x && x.stack) || new Error(a.join(' ')); } },
+  Image: function () { return { addEventListener: () => {}, style: {} }; },
   navigator: { userAgent: 'headless' },
   requestAnimationFrame: (cb) => { pending = cb; },
   Audio: function () { return { play: () => {} }; },
@@ -153,6 +157,24 @@ try {
   const k55 = kindsAt(55);
   if (Object.keys(k55).length) throw new Error('endless waves must be solid, got ' + JSON.stringify(k55));
   console.log('wave 55 blocks: {} (solid, as designed)');
+
+  // a bomber's blast kills its neighbours while the enemy loop is still
+  // running; that used to leave the loop pointing past the end of the list,
+  // throw, and freeze the game for good (players had to refresh)
+  H.setClass('warrior');
+  H.startGame();
+  H.game.gameState = 'playing';
+  H.game.enemies.length = 0;
+  H.game.spawnTimer = 99;
+  const wp = H.game.player;
+  H.spawnEnemyAt('skeleton', wp.x + 20, wp.y);
+  H.spawnEnemyAt('skeleton', wp.x - 20, wp.y);
+  H.spawnEnemyAt('bomber', wp.x + 10, wp.y + 10);
+  H.game.enemies.forEach(e => { if (e.type !== 'bomber') e.hp = 5; });
+  H.game.enemies[2].fuse = 0.001;
+  pump(3);
+  if (H.game.enemies.length !== 0) throw new Error('bomber blast left ' + H.game.enemies.length + ' enemies');
+  console.log('bomber blast killing its neighbours: no crash');
 
   // BOMBARDIER (v0.7): kill-blasts + both ascendancy actives
   H.setClass('bombardier');

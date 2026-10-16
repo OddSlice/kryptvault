@@ -762,10 +762,22 @@
   // ----- touch controls: drag anywhere = virtual joystick, tap = confirm -----
   var touchCtl = { active: false, id: null, ox: 0, oy: 0, vx: 0, vy: 0, moved: false };
 
+  function releaseStick() {
+    touchCtl.active = false; touchCtl.id = null;
+    touchCtl.vx = 0; touchCtl.vy = 0;
+  }
+  function hasTouchId(list, id) {
+    for (var i = 0; i < list.length; i++) if (list[i].identifier === id) return true;
+    return false;
+  }
+
   canvas.addEventListener('touchstart', function (e) {
     e.preventDefault();
     ensureAudio();
     lastInput = 'touch';
+    // the stick's finger is gone but its end was never reported (or its id is
+    // being reused): let go, or every tap after this would be ignored
+    if (touchCtl.active && (!hasTouchId(e.touches, touchCtl.id) || hasTouchId(e.changedTouches, touchCtl.id))) releaseStick();
     if (touchCtl.active) return;
     var t = e.changedTouches[0];
     var p = toGameCoords(t.clientX, t.clientY);
@@ -810,6 +822,13 @@
       }
     }
   }, { passive: false });
+
+  // the phone cancels a touch when a system gesture takes over (home-bar
+  // swipe, back swipe, a call banner). Without this the stick stayed held,
+  // the hero kept walking, and every tap was ignored: it looked frozen.
+  canvas.addEventListener('touchcancel', function (e) {
+    if (hasTouchId(e.changedTouches, touchCtl.id)) releaseStick();
+  });
 
   canvas.addEventListener('click', function (e) {
     ensureAudio();
@@ -2540,6 +2559,8 @@
   // ASCENDANCY — draft screen, pick handling, and the spacebar active
   // ---------------------------------------------------------------------------
   function triggerAscend() {
+    // the hero died in the same frame the boss fell: the run is over
+    if (game.gameState === 'gameover') return;
     // the same frame can level you up and kill the boss: keep that draft for later
     if (game.gameState === 'levelup') game.pendingLevelUps = (game.pendingLevelUps || 0) + 1;
     game.gameState = 'ascend';
@@ -2972,6 +2993,7 @@
 
     // ----- update enemies (chrono pickup freezes them solid) -----
     if (game.freezeTimer > 0) game.freezeTimer -= dt;
+    var blasts = []; // bombers whose fuse ran out; they go off after this loop
     for (var j = game.enemies.length - 1; j >= 0; j--) {
       var e = game.enemies[j];
       if (e.hitFlash > 0) e.hitFlash -= dt;
@@ -3000,7 +3022,7 @@
         if (e.fuse >= 0) {
           e.fuse -= dt;
           chase = 0; // stands its ground while fusing
-          if (e.fuse <= 0) { explodeBomber(j, e); continue; }
+          if (e.fuse <= 0) { game.enemies.splice(j, 1); blasts.push(e); continue; }
         }
       }
 
@@ -3213,6 +3235,9 @@
         }
       }
     }
+    // a blast kills its neighbours; doing that mid-loop shifted the list
+    // under the loop, threw, and froze the game until a refresh
+    for (var bl = 0; bl < blasts.length; bl++) explodeBomber(blasts[bl]);
 
     // ----- cultist projectiles (also frozen by chrono) -----
     for (var es = game.enemyShots.length - 1; es >= 0; es--) {
@@ -3431,7 +3456,9 @@
     }
 
     // ----- wave completion (normal waves; boss waves end on boss death) -----
-    if (!game.bossWave && game.waveKills >= game.waveTarget) {
+    // only from live play: the clearing kill can also open a level-up or end
+    // the run, and starting the next wave here wiped that draft or game over
+    if (!game.bossWave && game.waveKills >= game.waveTarget && game.gameState === 'playing') {
       beginWave(game.wave + 1);
     }
   }
@@ -3479,8 +3506,8 @@
   }
 
   // Bomber self-destruct: hurts the player AND other enemies caught in it.
-  function explodeBomber(index, e) {
-    game.enemies.splice(index, 1);
+  // The caller has already taken the bomber out of game.enemies.
+  function explodeBomber(e) {
     game.shockwaves.push({ x: e.x, y: e.y, t: 0, color: '#ff9f1c', label: 'BOOM!' });
     game.shakeTimer = 0.25;
     var p = game.player;
@@ -6423,15 +6450,28 @@
   }
 
   var lastTime = performance.now();
+  var frameErrors = 0;
+  function frameError(err) {
+    if (++frameErrors <= 5) console.error('KRYPTVAULT frame error:', err);
+  }
   function loop(ts) {
+    // book the next frame first and catch anything that throws: one bad frame
+    // used to stop the loop for good, which players saw as a frozen game
+    requestAnimationFrame(loop);
     var dt = (ts - lastTime) / 1000;
     lastTime = ts;
     if (dt > 0.05) dt = 0.05; // cap to avoid spiral of death
     frameDt = dt;
     uiTime += dt;
-    update(dt);
-    render();
-    requestAnimationFrame(loop);
+    try { update(dt); } catch (err) { frameError(err); }
+    try { render(); } catch (err) {
+      frameError(err);
+      // a draw that threw can skip its restore(): unwind the stack so a stray
+      // clip or fade can't stick to every frame after (empty stack = no-op)
+      for (var rs = 0; rs < 32; rs++) ctx.restore();
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
   }
   requestAnimationFrame(loop);
 

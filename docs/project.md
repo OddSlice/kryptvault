@@ -55,6 +55,28 @@ opens.
 
 ## What's been built (newest first)
 
+### v1.1: the random freeze
+- **Cause:** a bomber's blast could kill the monsters next to it while the game
+  was still stepping through its monster list. The list got shorter under the
+  loop, the next step read a monster that wasn't there, and the error stopped
+  the game loop for good. The picture froze, the music kept playing, and only a
+  refresh helped. It needed a bomber (from wave 3) to blow up beside weak
+  monsters at the right moment, so it looked random.
+  Bomber blasts now go off after the loop, the same way the Bombardier's
+  kill blasts already did.
+- **Safety net:** the loop books its next frame before doing any work and
+  catches errors, so a future bug costs one frame instead of the run. Errors
+  show in the browser console as `KRYPTVAULT frame error`. The headless test
+  still fails on them.
+- **Phones:** a touch the phone cancels (home-bar swipe, back gesture, call
+  banner) left the joystick held. The hero kept walking and every later tap
+  was ignored, which also looked like a freeze. Cancelled and lost touches now
+  let go of the stick.
+- **Same-frame events:** the kill that cleared a wave used to throw away the
+  level-up it also earned. Dying on that kill, or as a boss fell, replaced the
+  game-over screen with a draft for a dead hero, and the run was later counted
+  twice.
+
 ### v1.1: UI and UX overhaul
 - Text is sharp everywhere. The old 6px text was drawn at 480x270 and stretched.
 - Every menu shares one look: panels, a gold focus highlight, pixel icons, key

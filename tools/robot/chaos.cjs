@@ -188,7 +188,7 @@ const BOT = `
     const problems = [];
     page.on('pageerror', e => problems.push('PAGEERROR ' + (e.stack || e.message).split('\n').slice(0, 4).join(' | ')));
     await page.addInitScript(BOT.split('__SEED__').join(String(seed)).split('__INPUT__').join(input).split('__STORE__').join(store));
-    await page.route(u => u.hostname === 'kv.test' && !u.pathname.startsWith('/api'), r => r.fulfill({ contentType: 'text/html', body: html }));
+    await page.route(u => u.hostname === 'kv-test.vercel.app' && !u.pathname.startsWith('/api'), r => r.fulfill({ contentType: 'text/html', body: html }));
     await page.route('**/api/**', async r => {
       const req = r.request(), url = req.url(), get = req.method() === 'GET';
       const good = () => {
@@ -212,7 +212,7 @@ const BOT = `
       return good();
     });
     await page.route('https://fonts.googleapis.com/**', r => r.abort());
-    await page.goto('http://kv.test/');
+    await page.goto('https://kv-test.vercel.app/');
     await page.waitForFunction(() => window.__kv && window.__rafCb).catch(e => problems.push('BOOT ' + e.message));
     const t0 = Date.now();
     let frames = 0, hung = false;

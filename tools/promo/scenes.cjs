@@ -36,13 +36,13 @@ html = html.slice(0, cut) + `window.__kv = { game: game, runData: runData, start
     Math.random = function () { s += 0x6D2B79F5; var t = s; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
     window.__rafCb = null; window.requestAnimationFrame = function (cb) { window.__rafCb = cb; return 1; };
   });
-  await page.route(u => u.hostname === 'kv.test' && !u.pathname.startsWith('/api'), r => r.fulfill({ contentType: 'text/html', body: html }));
+  await page.route(u => u.hostname === 'kv-test.vercel.app' && !u.pathname.startsWith('/api'), r => r.fulfill({ contentType: 'text/html', body: html }));
   await page.route('**/api/**', r => r.fulfill({ contentType: 'application/json', body: '[]' }));
   if (FONT) {
     await page.route('https://fonts.googleapis.com/**', r => r.fulfill({ contentType: 'text/css', body: fs.readFileSync(FONT + 'ps2p.css', 'utf8') }));
     await page.route('https://fonts.gstatic.com/**', r => r.fulfill({ contentType: 'font/woff2', body: fs.readFileSync(FONT + r.request().url().split('/').pop()) }));
   }
-  await page.goto('http://kv.test/');
+  await page.goto('https://kv-test.vercel.app/');
   await page.waitForFunction(() => window.__kv && window.__rafCb);
   await page.evaluate(() => document.fonts.load('8px "Press Start 2P"'));
   await page.evaluate(() => { __kv.setMuted(true, true); __kv.runData.name = 'YOU'; });

@@ -145,13 +145,13 @@ const clamp01 = t => Math.max(0, Math.min(1, t));
   page.on('pageerror', e => console.log('PAGEERROR', e.message));
   page.on('console', m => { if (m.type() === 'error' && m.text().indexOf('KRYPTVAULT') !== -1) console.log('FRAME ERROR', m.text()); });
   await page.addInitScript(DIRECTOR);
-  await page.route(u => u.hostname === 'kv.test' && !u.pathname.startsWith('/api'), r => r.fulfill({ contentType: 'text/html', body: html }));
+  await page.route(u => u.hostname === 'kv-test.vercel.app' && !u.pathname.startsWith('/api'), r => r.fulfill({ contentType: 'text/html', body: html }));
   await page.route('**/api/**', r => r.fulfill({ contentType: 'application/json', body: r.request().method() === 'GET' ? JSON.stringify(LEADERBOARD) : 'null' }));
   if (FONT) {
     await page.route('https://fonts.googleapis.com/**', r => r.fulfill({ contentType: 'text/css', body: fs.readFileSync(FONT + 'ps2p.css', 'utf8') }));
     await page.route('https://fonts.gstatic.com/**', r => r.fulfill({ contentType: 'font/woff2', body: fs.readFileSync(FONT + r.request().url().split('/').pop()) }));
   }
-  await page.goto('http://kv.test/');
+  await page.goto('https://kv-test.vercel.app/');
   await page.waitForFunction(() => window.__kv && window.__rafCb);
   await page.evaluate(() => document.fonts.load('8px "Press Start 2P"'));
   await page.evaluate(() => window.__buildOverlay());

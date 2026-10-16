@@ -70,7 +70,9 @@ opens.
 
 - `og.png` (1200x630) is the picture link previews show (Discord, X, WhatsApp
   and so on). The `og:` and `twitter:` tags at the top of `index.html` point to it.
-- `press/` holds the 1920x1080 promo images.
+- `promo/` is the promo kit: the trailer, the 1920x1080 images, a copy of
+  the link-preview image and the 1.1/1.2 changelog, with a `README.txt` saying
+  what each file is. It isn't deployed.
 - `tools/promo/` rebuilds them all from the real game (needs Playwright):
   `scenes.cjs` stages and renders the game scenes, `compose.cjs` frames them
   with the logo and text, and `video.cjs` records the 30-second trailer (needs
@@ -80,8 +82,9 @@ opens.
 ## What's been built (newest first)
 
 ### Promo refresh (no game change)
-Link previews now show `og.png` with a title and description, new press
-images replace the old ones in `press/`, and `tools/promo/` can rebuild them.
+Link previews now show `og.png` with a title and description. The new promo
+kit in `promo/` (trailer, images, changelog) replaces the old images in
+`press/`, and `tools/promo/` can rebuild it.
 
 ### v1.2.1: crash reports
 Any error the game catches (the safety net from v1.1, plus errors anywhere

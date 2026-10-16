@@ -1,0 +1,3 @@
+KRYPTVAULT: what's new in 1.1 and 1.2
+
+Updates 1.1 and 1.2 give Kryptvault a whole new look: sharp text everywhere, redesigned menus with a hero roster and a real pause menu, a cleaner in-game display and full keyboard control. They also fix the random freeze, make the game play properly on phones, let Ranger and Bombardier runs onto the leaderboard (now showing each player's best run) and squash dozens of smaller bugs.

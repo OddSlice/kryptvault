@@ -26,6 +26,11 @@ export default async function handler(req, res) {
       if (v === undefined || v === null) return null;
       return typeof v === 'object' ? JSON.stringify(v) : String(v);
     });
+    // a real build summary is a few hundred characters; anything far bigger
+    // is junk, so it's dropped rather than stored (the score itself still counts)
+    const upg = COLUMNS.indexOf('upgrades'), ver = COLUMNS.indexOf('ver');
+    if (params[upg] && params[upg].length > 4000) params[upg] = null;
+    if (params[ver] && params[ver].length > 16) params[ver] = params[ver].slice(0, 16);
     try {
       // a run dropped by the rate limit inserts nothing but still counts as ok
       await query(

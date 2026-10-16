@@ -16,7 +16,8 @@ const ARGS = {
 
 export default async function handler(req, res) {
   const fn = req.query.fn;
-  if (!FUNCTIONS[fn]) return res.status(404).json({ error: 'unknown function' });
+  // own keys only: 'constructor' or 'toString' passed a plain lookup and crashed
+  if (!Object.prototype.hasOwnProperty.call(FUNCTIONS, fn)) return res.status(404).json({ error: 'unknown function' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
 
   const body = req.body || {};

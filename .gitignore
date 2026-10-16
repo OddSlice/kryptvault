@@ -1,3 +1,9 @@
 node_modules
 .DS_Store
 .vercel
+# database dumps and secrets (player vault keys) must never be committed
+neon-import.sql
+*.backup
+*.backup.gz
+.env
+.env.*

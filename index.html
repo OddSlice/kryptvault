@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var GAME_VERSION = '1.1';
+  var GAME_VERSION = '1.2';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
 
   // ---------------------------------------------------------------------------
@@ -132,6 +132,13 @@
   // one cached image, so a fractional scale can't open seams between tiles.
   // Capped at 6 (a 2880x1620 canvas) to keep fill cost sane on huge screens.
   function computeScale() {
+    // size the canvas to the visible window: CSS 100vh is taller than the
+    // screen on phones while the address bar shows, which cut off the bottom
+    // of the game (ability button included) and threw taps off target
+    if (canvas.style) {
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
+    }
     var sx = window.innerWidth / W;
     var sy = window.innerHeight / H;
     scale = Math.min(sx, sy);
@@ -154,6 +161,7 @@
   }
   computeScale();
   window.addEventListener('resize', computeScale);
+  window.addEventListener('orientationchange', computeScale);
 
   // ---------------------------------------------------------------------------
   // SPRITE LOADING — embedded base64 (no CORS), procedural fallback as safety.
@@ -217,8 +225,47 @@
   var _skinCtx = _skinBuf.getContext('2d');
   _skinCtx.imageSmoothingEnabled = false;
 
-  function drawTintedTile(tile, dx, dy, dw, dh, flip, tint, alpha) {
+  // a monster's tint never changes, so each tile+tint is coloured once and
+  // reused: re-tinting one scratch canvas per monster per frame made the GPU
+  // re-upload it every time (150+ times a frame from wave 11 on)
+  var _tintCache = {}, _tintCacheN = 0;
+  function tintedTile(tile, tint, alpha) {
+    var key = tile.x + ',' + tile.y + ',' + tint + ',' + alpha;
+    var c = _tintCache[key];
+    if (c) return c;
+    if (_tintCacheN >= 200) { _tintCache = {}; _tintCacheN = 0; }
+    c = document.createElement('canvas');
+    c.width = 16; c.height = 16;
+    var tc = c.getContext('2d');
+    tc.drawImage(spritesheet, tile.x, tile.y, 16, 16, 0, 0, 16, 16);
+    tc.globalCompositeOperation = 'source-atop';
+    tc.globalAlpha = alpha;
+    tc.fillStyle = tint;
+    tc.fillRect(0, 0, 16, 16);
+    _tintCache[key] = c; _tintCacheN++;
+    return c;
+  }
+
+  // cached: the tint is fixed (monsters); the hero's chroma skin changes
+  // colour every frame, so it keeps tinting the scratch canvas
+  function drawTintedTile(tile, dx, dy, dw, dh, flip, tint, alpha, cached) {
     if (!tile || useProceduralSprites || !sheetReady) return false;
+    var src = cached ? tintedTile(tile, tint, alpha) : _skinBuf;
+    if (!cached) tintScratch(tile, tint, alpha);
+    ctx.imageSmoothingEnabled = false;
+    if (flip) {
+      ctx.save();
+      ctx.translate(dx + dw, dy);
+      ctx.scale(-1, 1);
+      ctx.drawImage(src, 0, 0, 16, 16, 0, 0, dw, dh);
+      ctx.restore();
+    } else {
+      ctx.drawImage(src, 0, 0, 16, 16, dx, dy, dw, dh);
+    }
+    return true;
+  }
+
+  function tintScratch(tile, tint, alpha) {
     _skinCtx.clearRect(0, 0, 16, 16);
     _skinCtx.globalCompositeOperation = 'source-over';
     _skinCtx.globalAlpha = 1;
@@ -229,17 +276,6 @@
     _skinCtx.fillRect(0, 0, 16, 16);
     _skinCtx.globalAlpha = 1;
     _skinCtx.globalCompositeOperation = 'source-over';
-    ctx.imageSmoothingEnabled = false;
-    if (flip) {
-      ctx.save();
-      ctx.translate(dx + dw, dy);
-      ctx.scale(-1, 1);
-      ctx.drawImage(_skinBuf, 0, 0, 16, 16, 0, 0, dw, dh);
-      ctx.restore();
-    } else {
-      ctx.drawImage(_skinBuf, 0, 0, 16, 16, dx, dy, dw, dh);
-    }
-    return true;
   }
 
   // ---------------------------------------------------------------------------
@@ -255,7 +291,7 @@
         masterGain.connect(audioCtx.destination);
       } catch (e) { audioCtx = null; return; }
     }
-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    if (audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed') audioCtx.resume();
     // first user gesture unlocks audio: start the loop that fits where we are
     if (audioCtx && !music.playing && !musicMuted) {
       music.track = musicTrackForState();
@@ -522,6 +558,9 @@
     if (!audioCtx || musicMuted) return;
     var tr = MUSIC_TRACKS[music.track];
     var stepDur = tr.stepDur;
+    // a background tab or a long stall leaves the schedule behind the clock:
+    // pick up from now instead of playing every missed note at once
+    if (music.nextTime < audioCtx.currentTime) music.nextTime = audioCtx.currentTime + 0.05;
     while (music.nextTime < audioCtx.currentTime + 0.3) {
       var s = music.step;
       var t = music.nextTime;
@@ -627,10 +666,14 @@
   }
 
   window.addEventListener('keydown', function (e) {
+    // Ctrl/Cmd/Alt shortcuts belong to the browser (Ctrl+F used to toggle
+    // sound, and Ctrl+D left D held down once the bookmark dialog took the key-up)
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     ensureAudio();
     lastInput = 'key';
     keys[e.code] = true;
     var s = game.gameState, c = e.code;
+    if (!c && e.key === 'Enter') c = 'Enter'; // phone keyboards' Go/Return have no e.code
     if (s === 'nameentry') {
       if (c === 'Escape') { if (!e.repeat) goBack(); }
       else if (c === 'Enter' || c === 'NumpadEnter') confirmName();
@@ -659,7 +702,7 @@
           if ((pos >= 3 && pos < 7) || (pos >= 7 && pos < 15)) loginForm.buf += digit;
         } else if (c === 'Backspace') {
           loginForm.buf = loginForm.buf.slice(0, -1);
-          loginForm.state = 'idle';
+          if (loginForm.state !== 'checking') loginForm.state = 'idle';
           e.preventDefault();
         }
       }
@@ -708,7 +751,7 @@
     } else if (s === 'settings') {
       if (c === 'KeyN') openAccount('settings');
     } else if (s === 'account') {
-      if (n === 0) enterNameEntry('title');
+      if (n === 0) enterNameEntry('account');
       else if (n === 1) enterLogin();
     } else if (s === 'shop') {
       if (n >= 0 && n < SHOP_ITEMS.length) tryBuyShopItem(n);
@@ -739,11 +782,16 @@
   }
   window.addEventListener('keyup', function (e) { keys[e.code] = false; });
 
+  // from the canvas box itself (letterboxed by object-fit: contain), so a tap
+  // lands where the button is drawn whatever size the browser gave the canvas
   function toGameCoords(clientX, clientY) {
-    return {
-      x: (clientX - offsetX) / scale,
-      y: (clientY - offsetY) / scale
-    };
+    var r = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null;
+    if (r && r.width > 0 && r.height > 0) {
+      var s = Math.min(r.width / W, r.height / H);
+      return { x: (clientX - r.left - (r.width - W * s) / 2) / s,
+               y: (clientY - r.top - (r.height - H * s) / 2) / s };
+    }
+    return { x: (clientX - offsetX) / scale, y: (clientY - offsetY) / scale };
   }
 
   canvas.addEventListener('mousemove', function (e) {
@@ -760,7 +808,10 @@
   canvas.addEventListener('mousedown', ensureAudio);
 
   // ----- touch controls: drag anywhere = virtual joystick, tap = confirm -----
-  var touchCtl = { active: false, id: null, ox: 0, oy: 0, vx: 0, vy: 0, moved: false };
+  // The first finger down steers. Any other finger is a tap (ability, pause,
+  // a draft card, a menu button), so two-thumb play works.
+  var touchCtl = { active: false, id: null, ox: 0, oy: 0, vx: 0, vy: 0, moved: false, state: '', locked: false };
+  var touchTaps = {};   // second-finger touches: id -> { x, y, state, locked, moved }
 
   function releaseStick() {
     touchCtl.active = false; touchCtl.id = null;
@@ -770,6 +821,10 @@
     for (var i = 0; i < list.length; i++) if (list[i].identifier === id) return true;
     return false;
   }
+  // a touch counts as a tap only on the screen it started on, and not if it
+  // started while a draft or game over was still locked against stray input
+  function inputLocked() { return (game.draftLock || 0) > 0 || (game.overLock || 0) > 0; }
+  function tapCounts(state, locked) { return state === game.gameState && !locked; }
 
   canvas.addEventListener('touchstart', function (e) {
     e.preventDefault();
@@ -778,26 +833,37 @@
     // the stick's finger is gone but its end was never reported (or its id is
     // being reused): let go, or every tap after this would be ignored
     if (touchCtl.active && (!hasTouchId(e.touches, touchCtl.id) || hasTouchId(e.changedTouches, touchCtl.id))) releaseStick();
-    if (touchCtl.active) return;
-    var t = e.changedTouches[0];
-    var p = toGameCoords(t.clientX, t.clientY);
-    mouse.x = p.x; mouse.y = p.y;
-    // ability button (or the right-thumb corner zone) eats the touch —
-    // don't start a joystick on it
-    if (overAbilityBtn(p) || overThumbCast(p)) { castAbility(); return; }
-    touchCtl.active = true;
-    touchCtl.id = t.identifier;
-    touchCtl.ox = p.x; touchCtl.oy = p.y;
-    touchCtl.vx = 0; touchCtl.vy = 0;
-    touchCtl.moved = false;
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      var p = toGameCoords(t.clientX, t.clientY);
+      mouse.x = p.x; mouse.y = p.y;
+      // ability button (or the right-thumb corner zone) eats the touch
+      if (overAbilityBtn(p) || overThumbCast(p)) { castAbility(); continue; }
+      if (!touchCtl.active) {
+        touchCtl.active = true;
+        touchCtl.id = t.identifier;
+        touchCtl.ox = p.x; touchCtl.oy = p.y;
+        touchCtl.vx = 0; touchCtl.vy = 0;
+        touchCtl.moved = false;
+        touchCtl.state = game.gameState;
+        touchCtl.locked = inputLocked();
+      } else {
+        touchTaps[t.identifier] = { x: p.x, y: p.y, state: game.gameState, locked: inputLocked(), moved: false };
+      }
+    }
   }, { passive: false });
 
   canvas.addEventListener('touchmove', function (e) {
     e.preventDefault();
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
-      if (t.identifier !== touchCtl.id) continue;
       var p = toGameCoords(t.clientX, t.clientY);
+      var tap = touchTaps[t.identifier];
+      if (tap) {
+        if (Math.abs(p.x - tap.x) > 6 || Math.abs(p.y - tap.y) > 6) tap.moved = true;
+        continue;
+      }
+      if (t.identifier !== touchCtl.id) continue;
       var dx = (p.x - touchCtl.ox) / 28, dy = (p.y - touchCtl.oy) / 28;
       var len = Math.sqrt(dx * dx + dy * dy);
       if (len > 1) { dx /= len; dy /= len; }
@@ -808,12 +874,18 @@
 
   canvas.addEventListener('touchend', function (e) {
     e.preventDefault();
+    ensureAudio(); // some phones only count the end of a touch as a gesture
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
-      if (t.identifier !== touchCtl.id) continue;
-      var wasTap = !touchCtl.moved;
-      touchCtl.active = false;
-      touchCtl.vx = 0; touchCtl.vy = 0;
+      var wasTap = false;
+      if (t.identifier === touchCtl.id) {
+        wasTap = !touchCtl.moved && tapCounts(touchCtl.state, touchCtl.locked);
+        releaseStick();
+      } else if (touchTaps[t.identifier]) {
+        var tap = touchTaps[t.identifier];
+        delete touchTaps[t.identifier];
+        wasTap = !tap.moved && tapCounts(tap.state, tap.locked);
+      }
       if (wasTap) {
         // taps act like clicks on every non-playing screen
         var p = toGameCoords(t.clientX, t.clientY);
@@ -827,8 +899,21 @@
   // swipe, back swipe, a call banner). Without this the stick stayed held,
   // the hero kept walking, and every tap was ignored: it looked frozen.
   canvas.addEventListener('touchcancel', function (e) {
+    for (var i = 0; i < e.changedTouches.length; i++) delete touchTaps[e.changedTouches[i].identifier];
     if (hasTouchId(e.changedTouches, touchCtl.id)) releaseStick();
   });
+
+  // focus lost (alt-tab, switching apps, the right-click menu): the key-ups
+  // and touch-ends never arrive, so let go of everything and pause a live run
+  function dropAllInput() {
+    for (var k in keys) keys[k] = false;
+    releaseStick();
+    touchTaps = {};
+    if (game.gameState === 'playing') game.gameState = 'paused';
+  }
+  window.addEventListener('blur', dropAllInput);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) dropAllInput(); });
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
   canvas.addEventListener('click', function (e) {
     ensureAudio();
@@ -885,6 +970,7 @@
 
   // Enter the login screen from a user gesture, raising the mobile keyboard.
   function enterLogin() {
+    loginSeq++;
     loginForm.buf = '';
     loginForm.state = 'idle';
     game.gameState = 'login';
@@ -893,7 +979,7 @@
 
   function finishNameStep() {
     if (afterName === 'play') enterClassSelect();
-    else game.gameState = 'title';
+    else game.gameState = afterName === 'account' ? 'account' : 'title';
   }
 
   // name entry: lock in the initials and claim a fresh account
@@ -1089,7 +1175,7 @@
       toastNeedCoins(price);
       return;
     }
-    runData.coins -= price;
+    spendCoins(price);
     runData.shop[item.id] = lvl + 1;
     // first level bought auto-equips it if there's a free slot (nice default)
     if (lvl === 0 && runData.equippedTomes.indexOf(item.id) === -1 &&
@@ -1108,6 +1194,17 @@
   // a level playing field). Used everywhere a tome bonus is applied.
   function tomeLevel(id) {
     return isTomeEquipped(id) ? (runData.shop[id] || 0) : 0;
+  }
+
+  // opaque blend of hex over base: drawPanel paints the border colour under the
+  // fill, so a see-through fill shows the border through it
+  function mixHex(hex, base, t) {
+    var a = hex.replace('#', ''), b = base.replace('#', ''), out = '#';
+    for (var i = 0; i < 6; i += 2) {
+      var v = Math.round(parseInt(b.slice(i, i + 2), 16) * (1 - t) + parseInt(a.slice(i, i + 2), 16) * t);
+      out += (v < 16 ? '0' : '') + v.toString(16);
+    }
+    return out;
   }
 
   function hexToRgba(hex, a) {
@@ -1155,7 +1252,7 @@
     if (skinPending === id) {
       skinPending = null;
       if (runData.coins >= skin.price) {
-        runData.coins -= skin.price;
+        spendCoins(skin.price);
         runData.skinsOwned[id] = true;
         runData.equippedSkins[classId] = id; // equip on purchase
         saveRunData();
@@ -1436,6 +1533,9 @@
   function defaultRunData() {
     return { bestWave: 1, bestKills: 0, bestLevel: 1, totalRuns: 0, totalKills: 0,
              unlockedClasses: false, name: '', coins: 0,
+             // coins = coinsEarned - coinsSpent; both only grow, so merging
+             // two devices by max can't refund a purchase or drop earnings
+             coinsEarned: 0, coinsSpent: 0,
              seenFeedbackPrompt: false,
              playerDisc: '', playerSecret: '', playerId: '',
              shop: { vit: 0, mig: 0, swf: 0, wis: 0, frt: 0 },
@@ -1445,9 +1545,25 @@
              };
   }
 
+  function earnCoins(n) {
+    runData.coinsEarned += n;
+    runData.coins = runData.coinsEarned - runData.coinsSpent;
+  }
+  function spendCoins(n) {
+    runData.coinsSpent += n;
+    runData.coins = runData.coinsEarned - runData.coinsSpent;
+  }
+
   function saveRunData() {
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(runData)); } catch (e) { /* storage unavailable */ }
     progressDirty = true; // ship it upstream on the next sync tick
+  }
+
+  function sameKind(v, d) {
+    if (Array.isArray(d)) return Array.isArray(v);
+    if (d && typeof d === 'object') return !!v && typeof v === 'object' && !Array.isArray(v);
+    if (typeof d === 'number') return typeof v === 'number' && isFinite(v);
+    return typeof v === typeof d;
   }
 
   function loadRunData() {
@@ -1456,10 +1572,21 @@
       var raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return def;
       var data = JSON.parse(raw);
-      for (var k in def) if (!(k in data)) data[k] = def[k];
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return def;
+      var hadLoadout = Array.isArray(data.equippedTomes);
+      var hadLedger = typeof data.coinsEarned === 'number' && typeof data.coinsSpent === 'number';
+      // a missing or wrong-typed field (hand-edited or damaged save) falls
+      // back to its default instead of breaking a screen later
+      for (var k in def) if (!sameKind(data[k], def[k])) data[k] = def[k];
+      for (var t in def.shop) if (!sameKind(data.shop[t], 0)) data.shop[t] = 0;
+      // saves from before the earned/spent totals start from their balance; a
+      // balance changed since by an older version of the game is kept too
+      if (!hadLedger) { data.coinsEarned = data.coins; data.coinsSpent = 0; }
+      var drift = data.coins - (data.coinsEarned - data.coinsSpent);
+      if (drift > 0) data.coinsEarned += drift; else if (drift < 0) data.coinsSpent -= drift;
       // migrate players from the old always-on perks: auto-equip their 3
-      // highest-level tomes so their existing investment still applies
-      if (!data.equippedTomes || data.equippedTomes.length === 0) {
+      // highest-level tomes, once (an empty loadout chosen later must stick)
+      if (!hadLoadout) {
         var leveled = ['vit', 'mig', 'swf', 'wis', 'frt']
           .filter(function (id) { return (data.shop[id] || 0) > 0; })
           .sort(function (a, b) { return (data.shop[b] || 0) - (data.shop[a] || 0); });
@@ -1507,6 +1634,7 @@
       bestWave: runData.bestWave, bestKills: runData.bestKills, bestLevel: runData.bestLevel,
       totalRuns: runData.totalRuns, totalKills: runData.totalKills,
       coins: Math.round(runData.coins),
+      coinsEarned: runData.coinsEarned, coinsSpent: runData.coinsSpent,
       shop: runData.shop, equippedTomes: runData.equippedTomes,
       classesOwned: runData.classesOwned,
       skinsOwned: runData.skinsOwned, equippedSkins: runData.equippedSkins,
@@ -1519,9 +1647,16 @@
   // sets take the union — playing on two devices can only ever add up
   function applyProgress(sp) {
     if (!sp) return;
-    ['bestWave', 'bestKills', 'bestLevel', 'totalRuns', 'totalKills', 'coins'].forEach(function (k) {
+    ['bestWave', 'bestKills', 'bestLevel', 'totalRuns', 'totalKills'].forEach(function (k) {
       if (typeof sp[k] === 'number') runData[k] = Math.max(runData[k] || 0, sp[k]);
     });
+    // coins: max of each total, never of the balance (that refunded purchases)
+    var spSpent = typeof sp.coinsSpent === 'number' ? sp.coinsSpent : 0;
+    var spEarned = typeof sp.coinsEarned === 'number' ? sp.coinsEarned
+                 : (typeof sp.coins === 'number' ? sp.coins + spSpent : 0);
+    runData.coinsEarned = Math.max(runData.coinsEarned, spEarned);
+    runData.coinsSpent = Math.max(runData.coinsSpent, spSpent);
+    runData.coins = Math.max(0, runData.coinsEarned - runData.coinsSpent);
     if (sp.shop) for (var t in runData.shop) runData.shop[t] = Math.max(runData.shop[t] || 0, sp.shop[t] || 0);
     if (sp.classesOwned) for (var c in sp.classesOwned) if (sp.classesOwned[c]) runData.classesOwned[c] = true;
     if (sp.skinsOwned) for (var sk in sp.skinsOwned) if (sp.skinsOwned[sk]) runData.skinsOwned[sk] = true;
@@ -1543,7 +1678,9 @@
       p_id: runData.playerId,
       p_secret: runData.playerSecret,
       p_progress: collectProgress()
-    }, function () {});
+    }, function (ok) {
+      if (ok === undefined) progressDirty = true; // network failure: try again next tick
+    });
   }
 
   // pull on boot so a device you logged into earlier catches up with
@@ -1577,9 +1714,15 @@
     return runData.name + (runData.playerDisc ? '#' + runData.playerDisc : '');
   }
 
+  // a reply that arrives after the player moved on (new name, left the login
+  // screen, retried) is ignored: a late one used to swap accounts mid-run
+  var registerSeq = 0, loginSeq = 0;
+
   function registerAccount(silentToast) {
     account.state = 'creating';
+    var seq = ++registerSeq;
     sbRpc('register_player', { p_name: runData.name }, function (res) {
+      if (seq !== registerSeq) return;
       if (res && res.disc) {
         runData.playerDisc = res.disc;
         runData.playerSecret = res.secret;
@@ -1602,12 +1745,16 @@
     var nm = loginForm.buf.slice(0, 3);
     var dc = loginForm.buf.slice(3, 7);
     var ky = loginForm.buf.slice(7, 15);
+    var seq = ++loginSeq;
     sbRpc('login_player', { p_name: nm, p_disc: dc, p_secret: ky }, function (res) {
+      if (seq !== loginSeq) return;
       if (res && res.id) {
         runData.name = nm;
         runData.playerDisc = dc;
         runData.playerSecret = ky;
         runData.playerId = res.id;
+        registerSeq++;  // a registration still in flight belongs to the old identity
+        saveRunData(); // an account with no synced progress still has to stick
         // restore everything earned on other devices, then push the merge back
         applyProgress(res.progress);
         syncProgressUp();
@@ -1615,7 +1762,7 @@
         loginForm.buf = '';
         loginInput.value = '';
         game.toasts.push({ txt: 'LOGGED IN AS ' + playerTag(), t: 0 });
-        game.gameState = 'title';
+        if (game.gameState === 'login') game.gameState = 'title';
       } else {
         loginForm.state = res === null ? 'fail' : 'offline';
         loginForm.buf = loginForm.buf.slice(0, 7); // keep tag, clear the key
@@ -1631,7 +1778,14 @@
     leaderboard.state = 'loading';
     // fetch deep, then keep only each player's best run so one grinder
     // can't occupy half the board
-    fetch(API_SCORES).then(function (r) { return r.json(); }).then(function (rows) {
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 10000);
+    fetch(API_SCORES, { signal: ctrl ? ctrl.signal : undefined }).then(function (r) {
+      clearTimeout(timer);
+      if (!r.ok) throw new Error('scores ' + r.status); // an outage is not an empty board
+      return r.json();
+    }).then(function (rows) {
+      if (!Array.isArray(rows)) throw new Error('bad scores');
       var best = [], seen = {};
       if (Array.isArray(rows)) {
         for (var i = 0; i < rows.length && best.length < 10; i++) {
@@ -1671,6 +1825,7 @@
         mode: game.mode,
         disc: runData.playerDisc || null,
         player_id: runData.playerId || null,
+        secret: runData.playerSecret || null, // proves the tag is yours (the server checks it)
         ver: GAME_VERSION,
         // build analytics: upgrade counts + chosen ascendancy (asc_* key)
         upgrades: game.player ? game.player.upgradesTaken : null
@@ -1747,7 +1902,7 @@
     if (classUnlockPending === cls.id) {
       classUnlockPending = null;
       if (runData.coins >= cls.price) {
-        runData.coins -= cls.price;
+        spendCoins(cls.price);
         runData.classesOwned[cls.id] = true;
         saveRunData();
         game.toasts.push({ txt: cls.name + ' UNLOCKED!', t: 0 });
@@ -1808,6 +1963,7 @@
         if (kind === 'brick')  { wObj.breakable = true; wObj.bhp = 3; }
         else if (kind === 'ice')    { wObj.breakable = true; wObj.bhp = 2; }
         else if (kind === 'gilded') { wObj.breakable = true; wObj.bhp = 4; }
+        if (wObj.breakable) wObj.bhpMax = wObj.bhp;
         else if (kind === 'sand')   { wObj.soft = true; }
         else if (kind === 'magma')  { wObj.magma = true; }
         out.push(wObj);
@@ -1856,6 +2012,17 @@
       else ent.y += dd + 1;
       ent.x = clamp(ent.x, ent.w / 2, W - ent.w / 2);
       ent.y = clamp(ent.y, ent.h / 2, H - ent.h / 2);
+    }
+    if (!boxHitsWall(ent.x, ent.y, ent.w, ent.h)) return;
+    // squeezed between two walls (the nudges bounced back and forth): search
+    // outward for the nearest free spot instead of leaving it stuck inside
+    var ox = ent.x, oy = ent.y;
+    for (var r = 4; r <= 200; r += 4) {
+      for (var a = 0; a < 16; a++) {
+        var nx = clamp(ox + Math.cos(a * Math.PI / 8) * r, ent.w / 2, W - ent.w / 2);
+        var ny = clamp(oy + Math.sin(a * Math.PI / 8) * r, ent.h / 2, H - ent.h / 2);
+        if (!boxHitsWall(nx, ny, ent.w, ent.h)) { ent.x = nx; ent.y = ny; return; }
+      }
     }
   }
 
@@ -2021,6 +2188,7 @@
     game.floatTexts = [];
     game.pickups = [];
     game.hitStop = 0;
+    game.lastHitStop = -1;
     game.zaps = [];
     game.beams = [];
     game.zones = [];
@@ -2307,10 +2475,18 @@
   // ---------------------------------------------------------------------------
   // SHOOTING
   // ---------------------------------------------------------------------------
-  function findNearestEnemy(px, py) {
+  // a weaker chill never replaces a stronger one that is still running
+  // (frost shots used to cut the frost nova's 60% slow down to 30%)
+  function chill(e, amt, secs) {
+    if (!(e.slowT > 0) || amt >= (e.slowAmt || 0)) e.slowAmt = amt;
+    e.slowT = Math.max(e.slowT || 0, secs);
+  }
+
+  function findNearestEnemy(px, py, skip) {
     var best = null, bestD = Infinity;
     for (var i = 0; i < game.enemies.length; i++) {
       var e = game.enemies[i];
+      if (skip && skip.indexOf(e) !== -1) continue;
       var dx = e.x - px, dy = e.y - py;
       var d = dx * dx + dy * dy;
       if (d < bestD) { bestD = d; best = e; }
@@ -2337,7 +2513,7 @@
       bounces: (crit && p.deathseeker) ? 1 : p.ricochet,
       // homing strength: 0.08 base, +0.04 per extra pick; mage has an
       // innate 0.06 without the upgrade.
-      homing: p.homing > 0 ? (0.08 + (p.homing - 1) * 0.04) : (p.homingBase || 0),
+      homing: Math.max(p.homingBase || 0, p.homing > 0 ? (0.08 + (p.homing - 1) * 0.04) : 0),
       hitSet: []
     });
   }
@@ -2437,17 +2613,22 @@
     });
   }
 
+  // raise toward a cap / lower toward a floor, never the wrong way: an
+  // evolution can already be past a regular card's cap
+  function capUp(v, inc, cap) { return Math.max(v, Math.min(cap, v + inc)); }
+  function capDown(v, dec, floor) { return Math.min(v, Math.max(floor, v - dec)); }
+
   function applyUpgrade(u) {
     var p = game.player;
     p.upgradesTaken[u.id] = (p.upgradesTaken[u.id] || 0) + 1;
     switch (u.id) {
       // every upgrade carries a con; clamps keep heavy stacking survivable
-      case 'multishot': p.projectiles = Math.min(5, p.projectiles + 1);
+      case 'multishot': p.projectiles = capUp(p.projectiles, 1, p.bulletstorm ? 7 : 5);
                         p.damage = Math.max(5, Math.round(p.damage * 0.88)); break;
-      case 'atkspeed':  p.attackCooldown = Math.max(0.2, p.attackCooldown - 0.1);
+      case 'atkspeed':  p.attackCooldown = capDown(p.attackCooldown, 0.1, 0.2);
                         p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;
       case 'damage':    p.damage += 15;
-                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
+                        p.attackCooldown = capUp(p.attackCooldown, 0.05, 1.6); break;
       case 'health':    p.maxHp += 30;
                         // heal half of what's missing — a real panic button
                         p.hp = Math.min(p.maxHp, p.hp + Math.round((p.maxHp - p.hp) * 0.5 * p.healMult));
@@ -2463,24 +2644,24 @@
       case 'xpmagnet':  p.xpMult = Math.min(3, p.xpMult * 1.2);
                         game.curseSpeedMult *= 1.04; break;
       case 'shotgun':   p.shotgun += 1;
-                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.1); break;
+                        p.attackCooldown = capUp(p.attackCooldown, 0.1, 1.6); break;
       case 'homing':    p.homing += 1;
                         p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.85)); break;
       case 'shield':    p.shield += 1; rebuildOrbs();
                         p.speed = Math.max(40, p.speed - 8); break;
       case 'frost':     p.frost += 1;
                         p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
-      case 'crit':      p.critChance = Math.min(0.6, p.critChance + 0.10);
+      case 'crit':      p.critChance = capUp(p.critChance, 0.10, 0.6);
                         p.damage = Math.max(5, Math.round(p.damage * 0.95)); break;
       case 'armor':     p.armor = Math.min(0.5, p.armor + 0.10);
                         p.speed = Math.max(40, p.speed - 5); break;
       case 'static':    p.staticLvl += 1;
-                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
+                        p.attackCooldown = capUp(p.attackCooldown, 0.05, 1.6); break;
       case 'velocity':  p.shotSpeed = Math.round(p.shotSpeed * 1.25);
                         p.maxHp = Math.max(30, p.maxHp - 10);
                         p.hp = Math.min(p.hp, p.maxHp); break;
       case 'heavyshot': p.projSize += 1;
-                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
+                        p.attackCooldown = capUp(p.attackCooldown, 0.05, 1.6); break;
       // cursed upgrades — the downside is permanent for the rest of the run
       case 'lucky':       p.lucky += 1; game.curseHpMult *= 1.2; break;
       case 'darkpact':    p.pactLvl += 1; game.cultistLevel++; break;
@@ -2489,7 +2670,7 @@
                           p.maxHp = Math.max(30, p.maxHp - 20);
                           p.hp = Math.min(p.hp, p.maxHp); break;
       case 'hastepact': p.speed = Math.round(p.speed * 1.15);
-                        p.attackCooldown = Math.max(0.2, p.attackCooldown * 0.87);
+                        p.attackCooldown = Math.min(p.attackCooldown, Math.max(0.2, p.attackCooldown * 0.87));
                         game.spawnHaste *= 1.15; break;
       case 'retribution': p.retribution += 1;
                         p.maxHp = Math.max(30, p.maxHp - 15);
@@ -2594,7 +2775,7 @@
       case 'juggernaut': p.ascendDR = 0.10; break;
       // berserker passive lives in spawnProjectile (needs live HP)
       case 'phantom':    p.speed += 15; break;
-      case 'assassin':   p.critChance = 0.2; break;
+      case 'assassin':   p.critChance = Math.max(p.critChance, 0.2); break; // never lowers earlier picks
       case 'frostmage':  p.frost = Math.max(p.frost, 1); break;
       case 'lightmage':  p.homingBase = Math.max(p.homingBase, 0.10); break;
       case 'sniper':     p.shotSpeed = Math.round(p.shotSpeed * 1.25); break;
@@ -2671,8 +2852,7 @@
           ddx = e.x - p.x; ddy = e.y - p.y;
           if (ddx * ddx + ddy * ddy < 90 * 90) {
             e.frozenT = 2;
-            e.slowT = Math.max(e.slowT || 0, 3);
-            e.slowAmt = 0.6;
+            chill(e, 0.6, 3);
           }
         }
         spawnRingParticles(p.x, p.y, a.color);
@@ -2725,6 +2905,10 @@
           e = game.enemies[i];
           if (e.isBoss) { e.hp -= 120; addDmg(120, 'ability'); e.hitFlash = 0.08; continue; }
           game.pactBooms.push({ x: e.x, y: e.y, dmg: 90, r: 40, color: '#ffb03a' });
+        }
+        if (game.boss && game.boss.hp <= 0) {
+          var dbi = game.enemies.indexOf(game.boss);
+          if (dbi !== -1) killBoss(dbi, game.boss);
         }
         game.shakeTimer = 0.35;
         break;
@@ -2826,6 +3010,9 @@
     }
 
     // ----- player movement -----
+    // movement refuses any step into a wall, so a hero already inside one
+    // could never walk out: get them free first
+    if (boxHitsWall(p.x, p.y, p.w, p.h)) pushOutOfWalls(p);
     var dx = 0, dy = 0;
     if (keys['KeyW'] || keys['ArrowUp']) dy -= 1;
     if (keys['KeyS'] || keys['ArrowDown']) dy += 1;
@@ -2885,7 +3072,7 @@
           ze.hitFlash = 0.1;
           addDmg(zapDmg, 'static');
           spawnFloatText(ze.x, ze.y, '' + zapDmg, '#f5f76e');
-          game.zaps.push({ x1: p.x, y1: p.y, x2: ze.x, y2: ze.y, t: 0.15 });
+          game.zaps.push({ x1: p.x, y1: p.y, x2: ze.x, y2: ze.y, t: 0.15, jx: rand(-6, 6), jy: rand(-6, 6) });
           if (ze.hp <= 0) {
             var zi = game.enemies.indexOf(ze);
             if (zi !== -1) {
@@ -2919,8 +3106,10 @@
       // scan was O(projectiles x enemies) and the lag is imperceptible.
       if (pr.homing > 0) {
         pr.htT = (pr.htT || 0) - dt;
-        if (!pr.ht || pr.ht.hp <= 0 || pr.htT <= 0) {
-          pr.ht = findNearestEnemy(pr.x, pr.y);
+        // never steer back onto a monster this shot already went through:
+        // piercing shots used to circle it for good and pile up
+        if (!pr.ht || pr.ht.hp <= 0 || pr.htT <= 0 || pr.hitSet.indexOf(pr.ht) !== -1) {
+          pr.ht = findNearestEnemy(pr.x, pr.y, pr.hitSet);
           pr.htT = 0.1;
         }
         var ht = pr.ht;
@@ -2930,8 +3119,9 @@
           var diff = desired - cur;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
-          var step = diff * pr.homing;
-          var maxStep = 4 * Math.PI / 180;
+          // per second, not per frame: at 144 Hz it used to turn 2.4x harder
+          var step = diff * Math.min(1, pr.homing * dt * 60);
+          var maxStep = 4 * Math.PI / 180 * dt * 60;
           if (step > maxStep) step = maxStep;
           else if (step < -maxStep) step = -maxStep;
           var na = cur + step;
@@ -2963,8 +3153,7 @@
                 var ie = game.enemies[icn];
                 var idx2 = ie.x - wcx, idy2 = ie.y - wcy;
                 if (idx2 * idx2 + idy2 * idy2 < 55 * 55) {
-                  ie.slowT = Math.max(ie.slowT || 0, 2);
-                  ie.slowAmt = Math.max(ie.slowAmt || 0, 0.5);
+                  chill(ie, 0.5, 2);
                 }
               }
             } else if (hitWall.kind === 'gilded') {
@@ -3007,8 +3196,12 @@
       var ed = Math.sqrt(edx * edx + edy * edy) || 1;
       var chase = e.speed;
       if (e.type === 'cultist' || e.type === 'caster') {
-        if (ed < 70) chase = -e.speed * 0.7;       // back away
-        else if (ed < 110) chase = 0;              // hold range
+        // keep range only once on screen: off-screen they never came in and
+        // the edge timer blew them up in the player's face
+        if (e.x > 16 && e.x < W - 16 && e.y > 16 && e.y < H - 16) {
+          if (ed < 70) chase = -e.speed * 0.7;     // back away
+          else if (ed < 110) chase = 0;            // hold range
+        }
         e.shootTimer -= dt;
         if (e.shootTimer <= 0 && ed < 220) {
           e.shootTimer = e.type === 'caster' ? 2.2 : Math.max(1.2, 2.4 - game.cultistLevel * 0.2);
@@ -3194,6 +3387,16 @@
       }
       // both axes blocked: stay put this frame
 
+      // bosses never leave the arena once they're in (shots die at the edge,
+      // so an off-screen boss couldn't be hit); they spawn above it, so wait
+      if (e.isBoss) {
+        if (e.x >= e.w / 2 && e.x <= W - e.w / 2 && e.y >= e.h / 2 && e.y <= H - e.h / 2) e.entered = true;
+        if (e.entered) {
+          e.x = clamp(e.x, e.w / 2, W - e.w / 2);
+          e.y = clamp(e.y, e.h / 2, H - e.h / 2);
+        }
+      }
+
       // screen-edge danger countdown (bosses are immune)
       if (!e.isBoss) {
         var nearEdge = (e.x < 10 || e.x > W - 10 || e.y < 10 || e.y > H - 10);
@@ -3282,7 +3485,9 @@
       for (var pb = 0; pb < booms.length; pb++) {
         var boom = booms[pb];
         var br = boom.r || 30;
-        game.shockwaves.push({ x: boom.x, y: boom.y, t: 0.2, color: boom.color || '#9b59b6' });
+        // a ring the size of the blast and no label (an unlabelled ring read as
+        // the red SHOCKWAVE! edge warning); capped, a big chain queues hundreds
+        if (game.shockwaves.length < 60) game.shockwaves.push({ x: boom.x, y: boom.y, t: 0.2, color: boom.color || '#9b59b6', label: '', r: br });
         for (var be = game.enemies.length - 1; be >= 0; be--) {
           var bEn = game.enemies[be];
           var bdx = bEn.x - boom.x, bdy = bEn.y - boom.y;
@@ -3311,8 +3516,7 @@
           if (zdx * zdx + zdy * zdy < z.r * z.r) {
             zEn.hp -= 25;
             addDmg(25, 'ability');
-            zEn.slowT = Math.max(zEn.slowT || 0, 0.8);
-            zEn.slowAmt = Math.max(zEn.slowAmt || 0, 0.4);
+            chill(zEn, 0.4, 0.8);
             zEn.hitFlash = 0.08;
             if (zEn.hp <= 0) { if (zEn.isBoss) killBoss(ze, zEn); else killEnemy(ze, zEn); }
           }
@@ -3375,8 +3579,7 @@
           }
           // frost shots chill whatever they hit
           if (p.frost > 0) {
-            en.slowT = 1.0;
-            en.slowAmt = Math.min(0.6, 0.3 + (p.frost - 1) * 0.15);
+            chill(en, Math.min(0.6, 0.3 + (p.frost - 1) * 0.15), 1.0);
           }
           proj.hitSet.push(en);
           if (en.hp <= 0) {
@@ -3420,6 +3623,13 @@
       for (var oi = 0; oi < p.orbs.length; oi++) {
         var orb = p.orbs[oi];
         orb.angle += p.orbSpeed * dt;
+        // forget expired per-monster cooldowns now and then (the map grew by
+        // one entry per monster ever touched, for the whole run)
+        orb.pruneT = (orb.pruneT || 0) + dt;
+        if (orb.pruneT > 2) {
+          orb.pruneT = 0;
+          for (var hk in orb.hitCd) if (orb.hitCd[hk] < game.time) delete orb.hitCd[hk];
+        }
         orb.x = p.x + Math.cos(orb.angle) * p.orbRadius;
         orb.y = p.y + Math.sin(orb.angle) * p.orbRadius;
         // collide with enemies (descending so splices are safe)
@@ -3464,6 +3674,9 @@
   }
 
   function killEnemy(index, en) {
+    // the run already ended this frame and was saved: a kill now would show
+    // on the results screen but never reach the save or the leaderboard
+    if (game.gameState === 'gameover') { game.enemies.splice(index, 1); return; }
     spawnDeathParticles(en.x, en.y, en.color);
     var p = game.player;
     gainXP((en.xpVal || en.maxHp / 5) * p.xpMult);
@@ -3479,7 +3692,12 @@
     game.score++;
     game.waveKills++;
     game.coinsEarned += (1 + Math.floor(game.wave / 5)) * (1 + 0.25 * tomeLevel('frt')) * p.coinMult;
-    game.hitStop = Math.max(game.hitStop, 0.03); // tiny punch on every kill
+    // a tiny punch on a kill, at most every 0.25s: on every kill, chain kills
+    // froze the whole game (two dead frames per kill frame)
+    if (!(game.time - game.lastHitStop < 0.25)) {
+      game.hitStop = Math.max(game.hitStop, 0.03);
+      game.lastHitStop = game.time;
+    }
     maybeDropPickup(en.x, en.y);
     // dark pact: kills detonate (queued — resolved next tick so we never
     // recurse into the enemies array mid-splice)
@@ -3581,6 +3799,7 @@
   }
 
   function killBoss(index, en) {
+    if (game.gameState === 'gameover') { game.enemies.splice(index, 1); game.boss = null; return; }
     game.lastBossName = en.name || 'THE BOSS';
     bossExplosion(en.x, en.y);
     if (en.name) spawnFloatText(en.x, en.y - 22, en.name + ' SLAIN', en.color);
@@ -3654,7 +3873,7 @@
     if (game.level > runData.bestLevel) { runData.bestLevel = game.level; game.newRecord = true; }
     runData.totalRuns++;
     runData.totalKills += game.score;
-    runData.coins += Math.round(game.coinsEarned);
+    earnCoins(Math.round(game.coinsEarned));
     saveRunData();
     syncProgressUp(); // push immediately — a closed tab must not lose the run
     submitScore();
@@ -3828,7 +4047,7 @@
         ctx.fillStyle = 'rgba(255,255,255,0.28)';
         ctx.fillRect(wl.x + 2, wl.y + 2, 4, 1);
         ctx.fillRect(wl.x + 2, wl.y + 2, 1, 3);
-        var dmg = 3 - (wl.bhp || 3);
+        var dmg = (wl.bhpMax || 3) - (wl.bhp || 0); // hits taken (fresh ice showed 4 cracks)
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         for (var ck = 0; ck <= dmg * 3; ck++) {
           var ckx = wl.x + 2 + ((ck * 7 + wl.x) % Math.max(1, wl.w - 6));
@@ -3872,10 +4091,13 @@
     if (bgDirty || bgUsedSheet !== useSheet) {
       var old = ctx;
       ctx = bgCache.getContext('2d');
-      ctx.clearRect(0, 0, W, H);
-      drawFloor();
-      drawWalls();
-      ctx = old;
+      // finally: if a draw here threw, every later frame would go into the
+      // cache instead of the screen
+      try {
+        ctx.clearRect(0, 0, W, H);
+        drawFloor();
+        drawWalls();
+      } finally { ctx = old; }
       bgDirty = false;
       bgUsedSheet = useSheet;
     }
@@ -3964,13 +4186,15 @@
         ctx.globalAlpha = 0.8 * (1 - prog);
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(sw.x, sw.y, prog * (sw.label === 'BOOM!' ? 50 : 80), 0, Math.PI * 2);
+        ctx.arc(sw.x, sw.y, prog * (sw.r || (sw.label === 'BOOM!' ? 50 : 80)), 0, Math.PI * 2);
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
-      ctx.globalAlpha = Math.max(0, 1 - sw.t / 0.6);
-      text(sw.label || 'SHOCKWAVE!', sw.x, sw.y - 24, 8, sw.color || '#ff2d2d', 'center');
-      ctx.globalAlpha = 1;
+      if (sw.label !== '') {
+        ctx.globalAlpha = Math.max(0, 1 - sw.t / 0.6);
+        text(sw.label || 'SHOCKWAVE!', sw.x, sw.y - 24, 8, sw.color || '#ff2d2d', 'center');
+        ctx.globalAlpha = 1;
+      }
     }
   }
 
@@ -4030,13 +4254,14 @@
       drawBombardierSprite(p, bob);
       drew = true;
     } else if (tint) {
-      drew = drawTintedTile(tile, dx, dy + bob, 16, 16, p.facing === -1, tint, skin.chroma ? 0.62 : 0.5);
-      // epic skins get a tight 1px chroma glow that hugs the sprite (not a ring)
-      if (skin.chroma && drew) {
+      // epic skins get a tight 1px chroma glow that hugs the sprite (not a
+      // ring): behind it, 1px out on every side
+      if (skin.chroma) {
         ctx.globalAlpha = 0.25 + 0.15 * Math.sin(game.time * 6);
-        drawTintedTile(tile, dx - 1, dy + bob, 18, 18, p.facing === -1, tint, 1);
+        drawTintedTile(tile, dx - 1, dy - 1 + bob, 18, 18, p.facing === -1, tint, 1);
         ctx.globalAlpha = 1;
       }
+      drew = drawTintedTile(tile, dx, dy + bob, 16, 16, p.facing === -1, tint, skin.chroma ? 0.62 : 0.5);
     } else {
       drew = drawTile(tile, dx, dy + bob, 16, 16, p.facing === -1);
     }
@@ -4144,7 +4369,7 @@
     if (e.type === 'splitter' || e.type === 'mini') {
       var ss = e.type === 'splitter' ? 20 : 10;
       var sdrew = e.skinTint
-        ? drawTintedTile(e.tile, Math.round(e.x - ss / 2), Math.round(e.y - ss / 2), ss, ss, false, e.skinTint, e.skinAlpha || 0.3)
+        ? drawTintedTile(e.tile, Math.round(e.x - ss / 2), Math.round(e.y - ss / 2), ss, ss, false, e.skinTint, e.skinAlpha || 0.3, true)
         : drawTile(e.tile, Math.round(e.x - ss / 2), Math.round(e.y - ss / 2), ss, ss, false);
       if (!sdrew) {
         ctx.fillStyle = e.hitFlash > 0 ? '#fff' : e.color;
@@ -4163,7 +4388,7 @@
       return;
     }
     var drew = e.skinTint
-      ? drawTintedTile(e.tile, dx, dy, 16, 16, false, e.skinTint, e.skinAlpha || 0.3)
+      ? drawTintedTile(e.tile, dx, dy, 16, 16, false, e.skinTint, e.skinAlpha || 0.3, true)
       : drawTile(e.tile, dx, dy, 16, 16, false);
     if (drew) {
       if (e.hitFlash > 0) {
@@ -4215,7 +4440,7 @@
     ctx.stroke();
     // charger telegraph: violent white flashing + shake before the dash
     var tg = e.telegraph > 0 && Math.floor(e.telegraph * 12) % 2 === 0;
-    if (e.telegraph > 0) { bx += randInt(-2, 2); by += randInt(-2, 2); }
+    if (e.telegraph > 0 && game.gameState === 'playing') { bx += randInt(-2, 2); by += randInt(-2, 2); }
     if (e.kind === 'summoner') {
       drawNecromancer(e, bx, by, dsr, tg);
       return;
@@ -4445,8 +4670,10 @@
   function renderWorld() {
     ctx.save();
     // screen shake
+    game.shakeX = game.shakeY = 0;
     if (game.shakeTimer > 0 && prefs.shake) {
-      ctx.translate(randInt(-3, 3), randInt(-3, 3));
+      game.shakeX = randInt(-3, 3); game.shakeY = randInt(-3, 3);
+      ctx.translate(game.shakeX, game.shakeY);
     }
     drawBackground();
     // spike-trap zones sit on the floor, under everything that walks on it
@@ -4497,7 +4724,7 @@
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(z.x1, z.y1);
-      var zmx = (z.x1 + z.x2) / 2 + rand(-6, 6), zmy = (z.y1 + z.y2) / 2 + rand(-6, 6);
+      var zmx = (z.x1 + z.x2) / 2 + (z.jx || 0), zmy = (z.y1 + z.y2) / 2 + (z.jy || 0); // fixed per bolt: no flicker behind pause
       ctx.lineTo(zmx, zmy);
       ctx.lineTo(z.x2, z.y2);
       ctx.stroke();
@@ -4633,7 +4860,8 @@
     }
     drawOrb(cx, cy, r, ratio, '#ff3b3b', '#6a0010');
     text(String(Math.max(0, Math.ceil(p.hp))), cx, cy - 5, 6, '#ffffff', 'center');
-    text('/' + Math.round(p.maxHp), cx, cy + 2, 6, '#ffd0d0', 'center');
+    var mx = '/' + Math.round(p.maxHp);
+    text(mx, cx, cy + 2, mx.length > 4 ? 5 : 6, '#ffd0d0', 'center'); // 4-digit max HP: smaller, so it stays in the orb
   }
 
   // the ascendancy ability: a socket that charges up; locked until wave 10
@@ -4738,7 +4966,8 @@
     text(lv, W - 4 - lw / 2, 7, 6, '#cdf4ff', 'center');
 
     // life under the hero, where your eyes already are
-    var hbw = 24, hbx = Math.round(p.x - hbw / 2), hby = Math.round(p.y + p.h / 2 + 3);
+    // (offset by the screen shake, like the hero it's attached to)
+    var hbw = 24, hbx = Math.round(p.x - hbw / 2) + (game.shakeX || 0), hby = Math.round(p.y + p.h / 2 + 3) + (game.shakeY || 0);
     ctx.fillStyle = '#000';
     ctx.fillRect(hbx - 1, hby - 1, hbw + 2, 5);
     ctx.fillStyle = '#3a0a10';
@@ -5058,7 +5287,12 @@
   function uiBegin() {
     var s = game.gameState;
     if (uiFocusState !== s) {
-      if (uiFocusState && uiButtons[uiFocus]) uiFocusMem[uiFocusState] = uiButtons[uiFocus].id;
+      // remember where the cursor was, unless it was BACK (Enter would then
+      // leave the screen the moment it reopens)
+      if (uiFocusState && uiButtons[uiFocus]) {
+        if (uiButtons[uiFocus].id === 'back') delete uiFocusMem[uiFocusState];
+        else uiFocusMem[uiFocusState] = uiButtons[uiFocus].id;
+      }
       uiFocus = -1;
       uiWantId = UI_NO_FOCUS_MEMORY[s] ? null : (uiFocusMem[s] || null);
       uiFocusState = s;
@@ -5215,8 +5449,12 @@
       var cr = menuCritters[ci];
       cr.x += cr.vx * frameDt;
       cr.y += cr.vy * frameDt;
-      if (cr.x < 16 || cr.x > W - 16) { cr.vx *= -1; cr.flip = cr.vx < 0; }
-      if (cr.y < 16 || cr.y > H - 16) cr.vy *= -1;
+      // bounce back inside (flipping in place after a long frame left them
+      // flickering at the wall for good)
+      if (cr.x < 16) { cr.x = 16; cr.vx = Math.abs(cr.vx); cr.flip = false; }
+      else if (cr.x > W - 16) { cr.x = W - 16; cr.vx = -Math.abs(cr.vx); cr.flip = true; }
+      if (cr.y < 16) { cr.y = 16; cr.vy = Math.abs(cr.vy); }
+      else if (cr.y > H - 16) { cr.y = H - 16; cr.vy = -Math.abs(cr.vy); }
       if (!drawTile(cr.tile, Math.round(cr.x - 8), Math.round(cr.y - 8), 16, 16, cr.flip)) {
         ctx.fillStyle = '#666677';
         ctx.fillRect(Math.round(cr.x - 5), Math.round(cr.y - 5), 10, 10);
@@ -5240,9 +5478,9 @@
   function goBack() {
     var s = game.gameState;
     if (s === 'wardrobe') { game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title'; return; }
-    if (s === 'login') { blurHiddenInput(loginInput); game.gameState = 'account'; return; }
+    if (s === 'login') { loginSeq++; loginForm.state = 'idle'; blurHiddenInput(loginInput); game.gameState = 'account'; return; }
     if (s === 'account') { game.gameState = accountFrom; return; }
-    if (s === 'nameentry') { blurNameInput(); game.gameState = 'title'; return; }
+    if (s === 'nameentry') { blurNameInput(); game.gameState = afterName === 'account' ? 'account' : 'title'; return; }
     if (s === 'feedback') { game.gameState = 'title'; maybeRefreshLeaderboard(); return; }
     game.gameState = 'title';
   }
@@ -5259,6 +5497,13 @@
     uiButton({ id: 'back', x: 6, y: 6, w: 54, h: 16, icon: 'back', label: 'BACK', size: 6, onClick: goBack });
   }
 
+  // short coin counts for tight spots: 149K, 30.2M (8 digits ran into labels)
+  function fmtCoins(c) {
+    c = Math.round(c);
+    if (c >= 1e6) return (c >= 1e8 ? Math.round(c / 1e6) : Math.round(c / 1e5) / 10) + 'M';
+    if (c >= 1e5) return Math.round(c / 1e3) + 'K';
+    return '' + c;
+  }
   function fmtKills(k) {
     if (k >= 1000) {
       var v = k / 1000;
@@ -5318,7 +5563,7 @@
     var y = 98, gap = 26, bh = 22;
     uiButton({ id: 'shop', x: mx, y: y, w: mw, h: bh, icon: 'vault', label: 'THE VAULT',
       onClick: function () { game.gameState = 'shop'; },
-      right: function (xr, cy) { drawCoinAmount(xr, cy - 4, Math.round(runData.coins), 'right', 8); } });
+      right: function (xr, cy) { drawCoinAmount(xr, cy - 4, fmtCoins(runData.coins), 'right', 8); } });
 
     var newSkin = affordableSkinExists();
     uiButton({ id: 'skins', x: mx, y: y + gap, w: mw, h: bh, icon: 'skins', label: 'SKINS',
@@ -5352,7 +5597,7 @@
         if (runData.name) {
           text(playerTag(), b.x + 40, b.y + 8, 8, UI.cyan);
           if (runData.totalRuns > 0) {
-            text('BEST: W' + pad(runData.bestWave, 2) + ', ' + fmtKills(runData.bestKills) + ' KILLS', b.x + 40, b.y + 22, 6, UI.muted);
+            text('BEST W' + pad(runData.bestWave, 2) + ', ' + fmtKills(runData.bestKills) + ' KILLS', b.x + 40, b.y + 22, 6, UI.muted);
           } else {
             text('NO RUNS YET', b.x + 40, b.y + 22, 6, UI.muted);
           }
@@ -5495,7 +5740,7 @@
     }
     uiButton({ id: 'newacct', x: bx, y: by + n * 26, w: bw, h: bh, icon: 'account',
       label: runData.name ? 'NEW NAME / ACCOUNT' : 'CHOOSE A NAME',
-      onClick: function () { enterNameEntry('title'); } });
+      onClick: function () { enterNameEntry('account'); } });
     uiButton({ id: 'loginpc', x: bx, y: by + (n + 1) * 26, w: bw, h: bh, icon: 'key', label: 'LOG IN WITH KEY',
       onClick: enterLogin });
     drawHints([['ENTER', 'SELECT'], ['ESC', 'BACK']]);
@@ -5658,8 +5903,8 @@
     drawPanel(rx, ry, rw, 22, { fill: 'rgba(16,10,18,0.95)', border: '#3e2a3a' });
     drawHeroIcon(currentClass, rx + 6, ry + 3, 16);
     text(classDef(currentClass).name, rx + 28, ry + 8, 8, classTextColor(currentClass));
-    text('COINS EARNED', rx + rw - 72, ry + 9, 6, UI.muted, 'right');
-    drawCoinAmount(rx + rw - 8, ry + 7, '+' + Math.round(game.coinsEarned), 'right', 8);
+    var cew = drawCoinAmount(rx + rw - 8, ry + 7, '+' + Math.round(game.coinsEarned), 'right', 8);
+    text('COINS EARNED', rx + rw - 8 - cew - 6, ry + 9, 6, UI.muted, 'right'); // clear of a 7-digit amount
 
     // ----- damage attribution: what actually carried the run -----
     var dy = 132;
@@ -5683,6 +5928,20 @@
         ctx.fillStyle = cols[parts[si].k];
         ctx.fillRect(sx, barY, segW, barH);
         sx += segW;
+      }
+      // all seven sources don't fit one line (it ran off both screen edges):
+      // fold the smallest into OTHER until the legend fits the panel
+      var legendW = function (ps) {
+        var w = -12;
+        for (var q = 0; q < ps.length; q++) w += 9 + measureText(labels[ps[q].k] + ' ' + ps[q].pct + '%', 6) + 12;
+        return w;
+      };
+      while (parts.length > 2 && legendW(parts) > rw - 16) {
+        var mi = -1;
+        for (var q = 0; q < parts.length; q++) if (parts[q].k !== 'other' && (mi < 0 || parts[q].pct < parts[mi].pct)) mi = q;
+        var gone = parts.splice(mi, 1)[0], oth = null;
+        for (q = 0; q < parts.length; q++) if (parts[q].k === 'other') oth = parts[q];
+        if (oth) oth.pct += gone.pct; else parts.push({ k: 'other', pct: gone.pct });
       }
       var lstrs = parts.map(function (pp) { return labels[pp.k] + ' ' + pp.pct + '%'; });
       var lw = 0;
@@ -5814,6 +6073,7 @@
           var rEvo = EVOLUTIONS[re];
           if (game.player.upgradesTaken[rEvo.id]) continue;
           if (rEvo.needs.indexOf(c.upgrade.id) === -1) continue;
+          if (game.player.upgradesTaken[c.upgrade.id]) continue; // already have this half
           var otherIng = rEvo.needs[0] === c.upgrade.id ? rEvo.needs[1] : rEvo.needs[0];
           if (game.player.upgradesTaken[otherIng]) {
             recipeHint = 'UNLOCKS: ' + rEvo.name;
@@ -6077,7 +6337,7 @@
         uiButton({ id: 'equip_' + item.id, x: x, y: ry, w: w - upW - 4, h: 30,
           onClick: function () { toggleTomeEquip(idx); },
           draw: function (b, hot) {
-            var fill = hot ? UI.panelHi : (equipped ? hexToRgba(item.color, 0.10) : 'rgba(14,14,27,0.95)');
+            var fill = hot ? UI.panelHi : (equipped ? mixHex(item.color, UI.panel, 0.12) : 'rgba(14,14,27,0.95)');
             drawPanel(b.x, b.y, b.w, b.h, { fill: fill, border: hot ? UI.gold : (equipped ? item.color : UI.line) });
             if (equipped || hot) { ctx.fillStyle = hot ? UI.gold : item.color; ctx.fillRect(b.x + 1, b.y + 2, 2, b.h - 4); }
             drawTomeIcon(item.color, b.x + 10, b.y + 8, 14);

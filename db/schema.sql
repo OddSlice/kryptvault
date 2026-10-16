@@ -14,7 +14,7 @@ create table if not exists public.scores (
   wave int not null check (wave between 1 and 999),
   kills int not null check (kills between 0 and 99999),
   level int not null check (level between 1 and 99),
-  cls text not null check (cls in ('warrior', 'rogue', 'mage')),
+  cls text not null check (cls in ('warrior', 'rogue', 'mage', 'ranger', 'bombardier')),
   mode text not null default 'normal' check (mode in ('normal', 'daily')),
   day date not null default current_date,
   created_at timestamptz not null default now(),
@@ -116,8 +116,9 @@ language plpgsql
 set search_path = public
 as $$
 begin
-  -- hard sanity bounds (client caps kills at 99999 and level at 99)
-  if new.wave is null or new.wave < 1 or new.wave > 300 then
+  -- hard sanity bounds (client caps kills at 99999 and level at 99; the
+  -- table allows waves up to 999, endless runs went past the old 300)
+  if new.wave is null or new.wave < 1 or new.wave > 999 then
     raise exception 'invalid score';
   end if;
   if new.kills is null or new.kills < 0 or new.kills > 99999 then

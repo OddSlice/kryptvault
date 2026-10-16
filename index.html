@@ -674,7 +674,7 @@
           if ((pos >= 3 && pos < 7) || (pos >= 7 && pos < 15)) loginForm.buf += digit;
         } else if (c === 'Backspace') {
           loginForm.buf = loginForm.buf.slice(0, -1);
-          loginForm.state = 'idle';
+          if (loginForm.state !== 'checking') loginForm.state = 'idle';
           e.preventDefault();
         }
       }
@@ -723,7 +723,7 @@
     } else if (s === 'settings') {
       if (c === 'KeyN') openAccount('settings');
     } else if (s === 'account') {
-      if (n === 0) enterNameEntry('title');
+      if (n === 0) enterNameEntry('account');
       else if (n === 1) enterLogin();
     } else if (s === 'shop') {
       if (n >= 0 && n < SHOP_ITEMS.length) tryBuyShopItem(n);
@@ -942,6 +942,7 @@
 
   // Enter the login screen from a user gesture, raising the mobile keyboard.
   function enterLogin() {
+    loginSeq++;
     loginForm.buf = '';
     loginForm.state = 'idle';
     game.gameState = 'login';
@@ -950,7 +951,7 @@
 
   function finishNameStep() {
     if (afterName === 'play') enterClassSelect();
-    else game.gameState = 'title';
+    else game.gameState = afterName === 'account' ? 'account' : 'title';
   }
 
   // name entry: lock in the initials and claim a fresh account
@@ -1146,7 +1147,7 @@
       toastNeedCoins(price);
       return;
     }
-    runData.coins -= price;
+    spendCoins(price);
     runData.shop[item.id] = lvl + 1;
     // first level bought auto-equips it if there's a free slot (nice default)
     if (lvl === 0 && runData.equippedTomes.indexOf(item.id) === -1 &&
@@ -1212,7 +1213,7 @@
     if (skinPending === id) {
       skinPending = null;
       if (runData.coins >= skin.price) {
-        runData.coins -= skin.price;
+        spendCoins(skin.price);
         runData.skinsOwned[id] = true;
         runData.equippedSkins[classId] = id; // equip on purchase
         saveRunData();
@@ -1493,6 +1494,9 @@
   function defaultRunData() {
     return { bestWave: 1, bestKills: 0, bestLevel: 1, totalRuns: 0, totalKills: 0,
              unlockedClasses: false, name: '', coins: 0,
+             // coins = coinsEarned - coinsSpent; both only grow, so merging
+             // two devices by max can't refund a purchase or drop earnings
+             coinsEarned: 0, coinsSpent: 0,
              seenFeedbackPrompt: false,
              playerDisc: '', playerSecret: '', playerId: '',
              shop: { vit: 0, mig: 0, swf: 0, wis: 0, frt: 0 },
@@ -1500,6 +1504,15 @@
              classesOwned: {}, // coin-unlocked classes (e.g. ranger); base 3 are free
              skinsOwned: {}, equippedSkins: {}, // coin-bought hero skins (per class)
              };
+  }
+
+  function earnCoins(n) {
+    runData.coinsEarned += n;
+    runData.coins = runData.coinsEarned - runData.coinsSpent;
+  }
+  function spendCoins(n) {
+    runData.coinsSpent += n;
+    runData.coins = runData.coinsEarned - runData.coinsSpent;
   }
 
   function saveRunData() {
@@ -1522,10 +1535,16 @@
       var data = JSON.parse(raw);
       if (!data || typeof data !== 'object' || Array.isArray(data)) return def;
       var hadLoadout = Array.isArray(data.equippedTomes);
+      var hadLedger = typeof data.coinsEarned === 'number' && typeof data.coinsSpent === 'number';
       // a missing or wrong-typed field (hand-edited or damaged save) falls
       // back to its default instead of breaking a screen later
       for (var k in def) if (!sameKind(data[k], def[k])) data[k] = def[k];
       for (var t in def.shop) if (!sameKind(data.shop[t], 0)) data.shop[t] = 0;
+      // saves from before the earned/spent totals start from their balance; a
+      // balance changed since by an older version of the game is kept too
+      if (!hadLedger) { data.coinsEarned = data.coins; data.coinsSpent = 0; }
+      var drift = data.coins - (data.coinsEarned - data.coinsSpent);
+      if (drift > 0) data.coinsEarned += drift; else if (drift < 0) data.coinsSpent -= drift;
       // migrate players from the old always-on perks: auto-equip their 3
       // highest-level tomes, once (an empty loadout chosen later must stick)
       if (!hadLoadout) {
@@ -1576,6 +1595,7 @@
       bestWave: runData.bestWave, bestKills: runData.bestKills, bestLevel: runData.bestLevel,
       totalRuns: runData.totalRuns, totalKills: runData.totalKills,
       coins: Math.round(runData.coins),
+      coinsEarned: runData.coinsEarned, coinsSpent: runData.coinsSpent,
       shop: runData.shop, equippedTomes: runData.equippedTomes,
       classesOwned: runData.classesOwned,
       skinsOwned: runData.skinsOwned, equippedSkins: runData.equippedSkins,
@@ -1588,9 +1608,16 @@
   // sets take the union — playing on two devices can only ever add up
   function applyProgress(sp) {
     if (!sp) return;
-    ['bestWave', 'bestKills', 'bestLevel', 'totalRuns', 'totalKills', 'coins'].forEach(function (k) {
+    ['bestWave', 'bestKills', 'bestLevel', 'totalRuns', 'totalKills'].forEach(function (k) {
       if (typeof sp[k] === 'number') runData[k] = Math.max(runData[k] || 0, sp[k]);
     });
+    // coins: max of each total, never of the balance (that refunded purchases)
+    var spSpent = typeof sp.coinsSpent === 'number' ? sp.coinsSpent : 0;
+    var spEarned = typeof sp.coinsEarned === 'number' ? sp.coinsEarned
+                 : (typeof sp.coins === 'number' ? sp.coins + spSpent : 0);
+    runData.coinsEarned = Math.max(runData.coinsEarned, spEarned);
+    runData.coinsSpent = Math.max(runData.coinsSpent, spSpent);
+    runData.coins = Math.max(0, runData.coinsEarned - runData.coinsSpent);
     if (sp.shop) for (var t in runData.shop) runData.shop[t] = Math.max(runData.shop[t] || 0, sp.shop[t] || 0);
     if (sp.classesOwned) for (var c in sp.classesOwned) if (sp.classesOwned[c]) runData.classesOwned[c] = true;
     if (sp.skinsOwned) for (var sk in sp.skinsOwned) if (sp.skinsOwned[sk]) runData.skinsOwned[sk] = true;
@@ -1612,7 +1639,9 @@
       p_id: runData.playerId,
       p_secret: runData.playerSecret,
       p_progress: collectProgress()
-    }, function () {});
+    }, function (ok) {
+      if (ok === undefined) progressDirty = true; // network failure: try again next tick
+    });
   }
 
   // pull on boot so a device you logged into earlier catches up with
@@ -1646,9 +1675,15 @@
     return runData.name + (runData.playerDisc ? '#' + runData.playerDisc : '');
   }
 
+  // a reply that arrives after the player moved on (new name, left the login
+  // screen, retried) is ignored: a late one used to swap accounts mid-run
+  var registerSeq = 0, loginSeq = 0;
+
   function registerAccount(silentToast) {
     account.state = 'creating';
+    var seq = ++registerSeq;
     sbRpc('register_player', { p_name: runData.name }, function (res) {
+      if (seq !== registerSeq) return;
       if (res && res.disc) {
         runData.playerDisc = res.disc;
         runData.playerSecret = res.secret;
@@ -1671,12 +1706,16 @@
     var nm = loginForm.buf.slice(0, 3);
     var dc = loginForm.buf.slice(3, 7);
     var ky = loginForm.buf.slice(7, 15);
+    var seq = ++loginSeq;
     sbRpc('login_player', { p_name: nm, p_disc: dc, p_secret: ky }, function (res) {
+      if (seq !== loginSeq) return;
       if (res && res.id) {
         runData.name = nm;
         runData.playerDisc = dc;
         runData.playerSecret = ky;
         runData.playerId = res.id;
+        registerSeq++;  // a registration still in flight belongs to the old identity
+        saveRunData(); // an account with no synced progress still has to stick
         // restore everything earned on other devices, then push the merge back
         applyProgress(res.progress);
         syncProgressUp();
@@ -1684,7 +1723,7 @@
         loginForm.buf = '';
         loginInput.value = '';
         game.toasts.push({ txt: 'LOGGED IN AS ' + playerTag(), t: 0 });
-        game.gameState = 'title';
+        if (game.gameState === 'login') game.gameState = 'title';
       } else {
         loginForm.state = res === null ? 'fail' : 'offline';
         loginForm.buf = loginForm.buf.slice(0, 7); // keep tag, clear the key
@@ -1700,7 +1739,14 @@
     leaderboard.state = 'loading';
     // fetch deep, then keep only each player's best run so one grinder
     // can't occupy half the board
-    fetch(API_SCORES).then(function (r) { return r.json(); }).then(function (rows) {
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 10000);
+    fetch(API_SCORES, { signal: ctrl ? ctrl.signal : undefined }).then(function (r) {
+      clearTimeout(timer);
+      if (!r.ok) throw new Error('scores ' + r.status); // an outage is not an empty board
+      return r.json();
+    }).then(function (rows) {
+      if (!Array.isArray(rows)) throw new Error('bad scores');
       var best = [], seen = {};
       if (Array.isArray(rows)) {
         for (var i = 0; i < rows.length && best.length < 10; i++) {
@@ -1816,7 +1862,7 @@
     if (classUnlockPending === cls.id) {
       classUnlockPending = null;
       if (runData.coins >= cls.price) {
-        runData.coins -= cls.price;
+        spendCoins(cls.price);
         runData.classesOwned[cls.id] = true;
         saveRunData();
         game.toasts.push({ txt: cls.name + ' UNLOCKED!', t: 0 });
@@ -3784,7 +3830,7 @@
     if (game.level > runData.bestLevel) { runData.bestLevel = game.level; game.newRecord = true; }
     runData.totalRuns++;
     runData.totalKills += game.score;
-    runData.coins += Math.round(game.coinsEarned);
+    earnCoins(Math.round(game.coinsEarned));
     saveRunData();
     syncProgressUp(); // push immediately — a closed tab must not lose the run
     submitScore();
@@ -5373,9 +5419,9 @@
   function goBack() {
     var s = game.gameState;
     if (s === 'wardrobe') { game.gameState = wardrobeFrom === 'classselect' ? 'classselect' : 'title'; return; }
-    if (s === 'login') { blurHiddenInput(loginInput); game.gameState = 'account'; return; }
+    if (s === 'login') { loginSeq++; loginForm.state = 'idle'; blurHiddenInput(loginInput); game.gameState = 'account'; return; }
     if (s === 'account') { game.gameState = accountFrom; return; }
-    if (s === 'nameentry') { blurNameInput(); game.gameState = 'title'; return; }
+    if (s === 'nameentry') { blurNameInput(); game.gameState = afterName === 'account' ? 'account' : 'title'; return; }
     if (s === 'feedback') { game.gameState = 'title'; maybeRefreshLeaderboard(); return; }
     game.gameState = 'title';
   }
@@ -5628,7 +5674,7 @@
     }
     uiButton({ id: 'newacct', x: bx, y: by + n * 26, w: bw, h: bh, icon: 'account',
       label: runData.name ? 'NEW NAME / ACCOUNT' : 'CHOOSE A NAME',
-      onClick: function () { enterNameEntry('title'); } });
+      onClick: function () { enterNameEntry('account'); } });
     uiButton({ id: 'loginpc', x: bx, y: by + (n + 1) * 26, w: bw, h: bh, icon: 'key', label: 'LOG IN WITH KEY',
       onClick: enterLogin });
     drawHints([['ENTER', 'SELECT'], ['ESC', 'BACK']]);

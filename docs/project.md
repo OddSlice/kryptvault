@@ -66,7 +66,22 @@ opens.
 - Test text layout with the real pixel font. It is about 1.7x wider than the
   fallback, so a screenshot taken without it hides overflow.
 
+## Promo material
+
+- `og.png` (1200x630) is the picture link previews show (Discord, X, WhatsApp
+  and so on). The `og:` and `twitter:` tags at the top of `index.html` point to it.
+- `press/` holds the 1920x1080 promo images.
+- `tools/promo/` rebuilds them all from the real game (needs Playwright):
+  `scenes.cjs` stages and renders the game scenes, `compose.cjs` frames them
+  with the logo and text, and `video.cjs` records the 30-second trailer (needs
+  ffmpeg). The usage line is at the top of each file. To update the images
+  for a new version, change the text in `compose.cjs` and run it again.
+
 ## What's been built (newest first)
+
+### Promo refresh (no game change)
+Link previews now show `og.png` with a title and description, new press
+images replace the old ones in `press/`, and `tools/promo/` can rebuild them.
 
 ### v1.2.1: crash reports
 Any error the game catches (the safety net from v1.1, plus errors anywhere

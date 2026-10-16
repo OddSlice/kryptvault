@@ -1825,6 +1825,7 @@
         mode: game.mode,
         disc: runData.playerDisc || null,
         player_id: runData.playerId || null,
+        secret: runData.playerSecret || null, // proves the tag is yours (the server checks it)
         ver: GAME_VERSION,
         // build analytics: upgrade counts + chosen ascendancy (asc_* key)
         upgrades: game.player ? game.player.upgradesTaken : null

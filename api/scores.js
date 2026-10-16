@@ -4,6 +4,7 @@
 import { query } from './_db.js';
 
 const COLUMNS = ['name', 'wave', 'kills', 'level', 'cls', 'mode', 'disc', 'player_id', 'ver', 'upgrades'];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
@@ -34,6 +35,21 @@ export default async function handler(req, res) {
     });
     // a real build summary is a few hundred characters; anything far bigger
     // is junk, so it's dropped rather than stored (the score itself still counts)
+    // a tag is only trusted with the matching vault key. Without it the run
+    // still counts, but untagged: anyone could post as MAR#1234 before, and a
+    // forged post every 19s blocked that player's real runs (20s rate limit)
+    const nameAt = COLUMNS.indexOf('name'), discAt = COLUMNS.indexOf('disc'), idAt = COLUMNS.indexOf('player_id');
+    let owner = null;
+    if (typeof body.player_id === 'string' && UUID.test(body.player_id) && typeof body.secret === 'string' && body.secret) {
+      try {
+        const rows = await query('select name, disc from public.players where id = $1::uuid and secret = upper($2)', [body.player_id, body.secret]);
+        owner = rows[0] || null;
+      } catch (e) {
+        console.error('scores.js', e.message);
+      }
+    }
+    if (owner) { params[nameAt] = owner.name; params[discAt] = owner.disc; }
+    else { params[discAt] = null; params[idAt] = null; }
     const upg = COLUMNS.indexOf('upgrades'), ver = COLUMNS.indexOf('ver');
     if (params[upg] && params[upg].length > 4000) params[upg] = null;
     if (params[ver] && params[ver].length > 16) params[ver] = params[ver].slice(0, 16);

@@ -53,7 +53,46 @@ inside that screen's `render…` function. `kind: 'primary'` marks the main
 action, and `isDefault: true` picks the button that has focus when the screen
 opens.
 
+## Testing
+
+- `node tools/headless-test.js` runs the game in Node and plays through the
+  bosses. It fails on any error, including ones the game's safety net catches.
+- `tools/robot/fuzz.cjs` and `tools/robot/chaos.cjs` play seeded random runs
+  in real Chromium (needs Playwright). The fuzz robot plays and drafts; the chaos
+  robot also browses every menu with keyboard, touch or mouse, on a fine, flaky
+  or broken network, with clean, damaged, old or blocked save data, while the
+  window keeps resizing. Both report errors, hangs, drafts that never close and
+  screens you can't leave. Example: `node tools/robot/chaos.cjs index.html 1 20`.
+- Test text layout with the real pixel font. It is about 1.7x wider than the
+  fallback, so a screenshot taken without it hides overflow.
+
 ## What's been built (newest first)
+
+### v1.2: full sweep (game and server)
+A line-by-line review of the whole game and the server, plus the robots
+above. Every fix was reproduced by a test on the old build first.
+- **Phones:** the canvas fits the visible screen and taps land where buttons
+  are drawn (with the address bar showing, the bottom was cut off and taps hit
+  the wrong button). A second finger works: ability, pause and cards while the
+  other thumb steers or rests. Lifting a thumb no longer picks the card under it.
+- **Focus loss:** alt-tab or switching apps releases held keys and pauses the run.
+- **Gameplay:**
+  - Nobody gets stuck inside a wall when a wave changes.
+  - Bosses stay in the arena.
+  - Casters walk in instead of exploding at the edge.
+  - Homing shots don't pile up around a monster.
+  - Hit-stop is limited to once every 0.25s; chain kills used to freeze the hero.
+  - No card lowers a stat it should raise.
+- **Saves:** coins are two totals that only grow (earned, spent), so a purchase
+  can't be refunded by another device. Late login replies can't swap accounts
+  mid-run, and failed uploads retry.
+- **Server:** `db/update-2026-10-16.sql` lets Ranger and Bombardier scores in
+  (the database rejected every one of them) and lifts the wave-300 cap. **It
+  has to be run once in the Neon SQL editor.** The board shows each player's
+  best run.
+- **Looks:** checked with the real font. The damage legend, the HP orb, the coin
+  labels and the equipped Vault rows no longer overflow.
+- **Speed:** tinted monsters are coloured once instead of every frame.
 
 ### v1.1: the random freeze
 - **Cause:** a bomber's blast could kill the monsters next to it while the game

@@ -60,6 +60,12 @@
 
   var GAME_VERSION = '1.2.1';
   var ITCH_URL = 'https://oddslice.itch.io/kryptvault';
+  // The server (leaderboard, accounts, saves, crash reports) lives on Vercel.
+  // On kryptvault.vercel.app and its preview deploys the short /api/... paths
+  // reach it; anywhere else, such as the copy uploaded to itch.io or a file
+  // opened from disk, the game has to use the full address.
+  var apiHost = window.location.hostname || '';
+  var API_BASE = /(^|\.)vercel\.app$/.test(apiHost) || /^(localhost|127\.0\.0\.1)$/.test(apiHost) ? '' : 'https://kryptvault.vercel.app';
 
   // ---------------------------------------------------------------------------
   // CRASH REPORTS: errors the game catches are sent to /api/errors so a new bug
@@ -87,9 +93,12 @@
         st = { s: game.gameState, wave: game.wave, lvl: game.level, cls: currentClass,
                asc: pl.ascendancy ? pl.ascendancy.id : null, en: (game.enemies || []).length, t: Math.round(game.time || 0) };
       }
-      fetch('/api/errors', {
+      // sent as plain text: from another site (itch.io) a JSON body would need
+      // a permission round-trip first, which some browsers refuse for a
+      // keepalive request; the server reads the JSON out of the text
+      fetch(API_BASE + '/api/errors', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
         keepalive: true,
         body: JSON.stringify({ v: GAME_VERSION, kind: kind, msg: msg, stack: stack, state: st,
           ua: String(navigator.userAgent || '').slice(0, 300),
@@ -1662,8 +1671,8 @@
   // ---------------------------------------------------------------------------
   // GLOBAL LEADERBOARD (Vercel functions in /api, backed by Neon Postgres)
   // ---------------------------------------------------------------------------
-  var API_SCORES = '/api/scores';
-  var API_RPC = '/api/rpc/';
+  var API_SCORES = API_BASE + '/api/scores';
+  var API_RPC = API_BASE + '/api/rpc/';
 
   // cb gets the result, or undefined on a network error or after 10 seconds
   function sbRpc(fn, body, cb) {

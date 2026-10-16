@@ -2,11 +2,13 @@
 //   GET  /api/scores  -> each player's best normal-mode run, top 80
 //   POST /api/scores  -> submit a run; the scores_validate trigger checks it
 import { query } from './_db.js';
+import { allowCors } from './_cors.js';
 
 const COLUMNS = ['name', 'wave', 'kills', 'level', 'cls', 'mode', 'disc', 'player_id', 'ver', 'upgrades'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default async function handler(req, res) {
+  if (allowCors(req, res)) return;
   if (req.method === 'GET') {
     try {
       // each player's best run only: 80 raw rows could be mostly one grinder,

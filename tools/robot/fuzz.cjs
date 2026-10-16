@@ -122,10 +122,10 @@ const BOT = `
     const asyncErrs = [];
     page.on('pageerror', e => asyncErrs.push(e.stack || e.message));
     await page.addInitScript(BOT.split('__SEED__').join(String(seed)));
-    await page.route(u => u.hostname === 'kv.test' && !u.pathname.startsWith('/api'), r => r.fulfill({ contentType: 'text/html', body: html }));
+    await page.route(u => u.hostname === 'kv-test.vercel.app' && !u.pathname.startsWith('/api'), r => r.fulfill({ contentType: 'text/html', body: html }));
     await page.route('**/api/**', r => r.fulfill({ contentType: 'application/json', body: r.request().method() === 'GET' ? '[]' : 'null' }));
     await page.route('https://fonts.googleapis.com/**', r => r.abort());
-    await page.goto('http://kv.test/');
+    await page.goto('https://kv-test.vercel.app/');
     await page.waitForFunction(() => window.__kv && window.__rafCb);
     const cls = classes[seed % classes.length], mode = process.argv[6] ? +process.argv[6] : Math.floor(seed / 5) % 4, god = mode % 2 === 1;
     const jump = mode >= 2 ? 8 + (seed * 37) % 58 : 0;

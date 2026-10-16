@@ -7,6 +7,14 @@ Kept in git for backup, excluded from Vercel deploys via `../.vercelignore`.
 Purpose: fast rollback if a release breaks. Git tags (`git tag`) mark the same
 points in history; these zips are the grab-and-go copies.
 
+## Uploading to itch.io
+
+Each zip is ready to upload to itch.io as an HTML game: `index.html` sits at the
+top of the zip. From 1.2.1 on, a copy running anywhere other than Vercel (itch,
+or a file opened from disk) talks to the server at kryptvault.vercel.app, so the
+leaderboard, accounts and saves work there too. The 1.1 and 1.2 zips can't:
+uploaded to itch, they lose all of that.
+
 ## Roll back production to a known-good version
 
 ```sh

@@ -87,7 +87,19 @@ Link previews now show `og.png` with a title and description. The new promo
 kit in `promo/` (trailer, images, changelog) replaces the old images in
 `press/`, and `tools/promo/` can rebuild it.
 
-### v1.2.1: crash reports
+### v1.2.1: crash reports, and the game runs on itch.io
+**itch.io:** since the move to Neon (v1.1) the game reached its server through
+short `/api/...` paths, which only work on kryptvault.vercel.app. A copy
+uploaded to itch (served from itch's own servers) lost the leaderboard,
+accounts, saves and crash reports. Now the game uses the full
+`https://kryptvault.vercel.app` address whenever it isn't on a vercel.app host
+(or localhost), and the API routes answer the browser's cross-site check
+(`api/_cors.js`: any site may call them; there are no cookies or logins). Crash
+reports go as plain text so they need no extra round-trip. Tested with the game
+and the real API handlers on two different sites in Chromium: everything
+connects, and the old build fails every check. `versions/kryptvault-v1.2.1.zip`
+is the file to upload to itch.
+
 Any error the game catches (the safety net from v1.1, plus errors anywhere
 else in the game's own code) is sent to `/api/errors` and stored in the
 `error_reports` table. Each report holds the message, where in the code it

@@ -4,10 +4,12 @@
 // device can fill the database. Read them in the Neon SQL editor:
 //   select created_at, ver, kind, msg, state, ua from public.error_reports order by id desc limit 50;
 import { query } from './_db.js';
+import { allowCors } from './_cors.js';
 
 const cut = (v, n) => (typeof v === 'string' && v ? v.slice(0, n) : null);
 
 export default async function handler(req, res) {
+  if (allowCors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
   let b = req.body;
   if (typeof b === 'string') { try { b = JSON.parse(b); } catch (e) { b = null; } }

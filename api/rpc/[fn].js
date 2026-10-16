@@ -1,6 +1,7 @@
 // Account RPCs: POST /api/rpc/<fn> with the same JSON body the game used to
 // send to Supabase. Each call maps onto the Postgres function of that name.
 import { query } from '../_db.js';
+import { allowCors } from '../_cors.js';
 
 const FUNCTIONS = {
   register_player: 'select public.register_player($1) as r',
@@ -15,6 +16,7 @@ const ARGS = {
 };
 
 export default async function handler(req, res) {
+  if (allowCors(req, res)) return;
   const fn = req.query.fn;
   // own keys only: 'constructor' or 'toString' passed a plain lookup and crashed
   if (!Object.prototype.hasOwnProperty.call(FUNCTIONS, fn)) return res.status(404).json({ error: 'unknown function' });

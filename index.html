@@ -132,6 +132,13 @@
   // one cached image, so a fractional scale can't open seams between tiles.
   // Capped at 6 (a 2880x1620 canvas) to keep fill cost sane on huge screens.
   function computeScale() {
+    // size the canvas to the visible window: CSS 100vh is taller than the
+    // screen on phones while the address bar shows, which cut off the bottom
+    // of the game (ability button included) and threw taps off target
+    if (canvas.style) {
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
+    }
     var sx = window.innerWidth / W;
     var sy = window.innerHeight / H;
     scale = Math.min(sx, sy);
@@ -154,6 +161,7 @@
   }
   computeScale();
   window.addEventListener('resize', computeScale);
+  window.addEventListener('orientationchange', computeScale);
 
   // ---------------------------------------------------------------------------
   // SPRITE LOADING — embedded base64 (no CORS), procedural fallback as safety.
@@ -255,7 +263,7 @@
         masterGain.connect(audioCtx.destination);
       } catch (e) { audioCtx = null; return; }
     }
-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    if (audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed') audioCtx.resume();
     // first user gesture unlocks audio: start the loop that fits where we are
     if (audioCtx && !music.playing && !musicMuted) {
       music.track = musicTrackForState();
@@ -522,6 +530,9 @@
     if (!audioCtx || musicMuted) return;
     var tr = MUSIC_TRACKS[music.track];
     var stepDur = tr.stepDur;
+    // a background tab or a long stall leaves the schedule behind the clock:
+    // pick up from now instead of playing every missed note at once
+    if (music.nextTime < audioCtx.currentTime) music.nextTime = audioCtx.currentTime + 0.05;
     while (music.nextTime < audioCtx.currentTime + 0.3) {
       var s = music.step;
       var t = music.nextTime;
@@ -627,10 +638,14 @@
   }
 
   window.addEventListener('keydown', function (e) {
+    // Ctrl/Cmd/Alt shortcuts belong to the browser (Ctrl+F used to toggle
+    // sound, and Ctrl+D left D held down once the bookmark dialog took the key-up)
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     ensureAudio();
     lastInput = 'key';
     keys[e.code] = true;
     var s = game.gameState, c = e.code;
+    if (!c && e.key === 'Enter') c = 'Enter'; // phone keyboards' Go/Return have no e.code
     if (s === 'nameentry') {
       if (c === 'Escape') { if (!e.repeat) goBack(); }
       else if (c === 'Enter' || c === 'NumpadEnter') confirmName();
@@ -739,11 +754,16 @@
   }
   window.addEventListener('keyup', function (e) { keys[e.code] = false; });
 
+  // from the canvas box itself (letterboxed by object-fit: contain), so a tap
+  // lands where the button is drawn whatever size the browser gave the canvas
   function toGameCoords(clientX, clientY) {
-    return {
-      x: (clientX - offsetX) / scale,
-      y: (clientY - offsetY) / scale
-    };
+    var r = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null;
+    if (r && r.width > 0 && r.height > 0) {
+      var s = Math.min(r.width / W, r.height / H);
+      return { x: (clientX - r.left - (r.width - W * s) / 2) / s,
+               y: (clientY - r.top - (r.height - H * s) / 2) / s };
+    }
+    return { x: (clientX - offsetX) / scale, y: (clientY - offsetY) / scale };
   }
 
   canvas.addEventListener('mousemove', function (e) {
@@ -760,7 +780,10 @@
   canvas.addEventListener('mousedown', ensureAudio);
 
   // ----- touch controls: drag anywhere = virtual joystick, tap = confirm -----
-  var touchCtl = { active: false, id: null, ox: 0, oy: 0, vx: 0, vy: 0, moved: false };
+  // The first finger down steers. Any other finger is a tap (ability, pause,
+  // a draft card, a menu button), so two-thumb play works.
+  var touchCtl = { active: false, id: null, ox: 0, oy: 0, vx: 0, vy: 0, moved: false, state: '', locked: false };
+  var touchTaps = {};   // second-finger touches: id -> { x, y, state, locked, moved }
 
   function releaseStick() {
     touchCtl.active = false; touchCtl.id = null;
@@ -770,6 +793,10 @@
     for (var i = 0; i < list.length; i++) if (list[i].identifier === id) return true;
     return false;
   }
+  // a touch counts as a tap only on the screen it started on, and not if it
+  // started while a draft or game over was still locked against stray input
+  function inputLocked() { return (game.draftLock || 0) > 0 || (game.overLock || 0) > 0; }
+  function tapCounts(state, locked) { return state === game.gameState && !locked; }
 
   canvas.addEventListener('touchstart', function (e) {
     e.preventDefault();
@@ -778,26 +805,37 @@
     // the stick's finger is gone but its end was never reported (or its id is
     // being reused): let go, or every tap after this would be ignored
     if (touchCtl.active && (!hasTouchId(e.touches, touchCtl.id) || hasTouchId(e.changedTouches, touchCtl.id))) releaseStick();
-    if (touchCtl.active) return;
-    var t = e.changedTouches[0];
-    var p = toGameCoords(t.clientX, t.clientY);
-    mouse.x = p.x; mouse.y = p.y;
-    // ability button (or the right-thumb corner zone) eats the touch —
-    // don't start a joystick on it
-    if (overAbilityBtn(p) || overThumbCast(p)) { castAbility(); return; }
-    touchCtl.active = true;
-    touchCtl.id = t.identifier;
-    touchCtl.ox = p.x; touchCtl.oy = p.y;
-    touchCtl.vx = 0; touchCtl.vy = 0;
-    touchCtl.moved = false;
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      var p = toGameCoords(t.clientX, t.clientY);
+      mouse.x = p.x; mouse.y = p.y;
+      // ability button (or the right-thumb corner zone) eats the touch
+      if (overAbilityBtn(p) || overThumbCast(p)) { castAbility(); continue; }
+      if (!touchCtl.active) {
+        touchCtl.active = true;
+        touchCtl.id = t.identifier;
+        touchCtl.ox = p.x; touchCtl.oy = p.y;
+        touchCtl.vx = 0; touchCtl.vy = 0;
+        touchCtl.moved = false;
+        touchCtl.state = game.gameState;
+        touchCtl.locked = inputLocked();
+      } else {
+        touchTaps[t.identifier] = { x: p.x, y: p.y, state: game.gameState, locked: inputLocked(), moved: false };
+      }
+    }
   }, { passive: false });
 
   canvas.addEventListener('touchmove', function (e) {
     e.preventDefault();
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
-      if (t.identifier !== touchCtl.id) continue;
       var p = toGameCoords(t.clientX, t.clientY);
+      var tap = touchTaps[t.identifier];
+      if (tap) {
+        if (Math.abs(p.x - tap.x) > 6 || Math.abs(p.y - tap.y) > 6) tap.moved = true;
+        continue;
+      }
+      if (t.identifier !== touchCtl.id) continue;
       var dx = (p.x - touchCtl.ox) / 28, dy = (p.y - touchCtl.oy) / 28;
       var len = Math.sqrt(dx * dx + dy * dy);
       if (len > 1) { dx /= len; dy /= len; }
@@ -808,12 +846,18 @@
 
   canvas.addEventListener('touchend', function (e) {
     e.preventDefault();
+    ensureAudio(); // some phones only count the end of a touch as a gesture
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
-      if (t.identifier !== touchCtl.id) continue;
-      var wasTap = !touchCtl.moved;
-      touchCtl.active = false;
-      touchCtl.vx = 0; touchCtl.vy = 0;
+      var wasTap = false;
+      if (t.identifier === touchCtl.id) {
+        wasTap = !touchCtl.moved && tapCounts(touchCtl.state, touchCtl.locked);
+        releaseStick();
+      } else if (touchTaps[t.identifier]) {
+        var tap = touchTaps[t.identifier];
+        delete touchTaps[t.identifier];
+        wasTap = !tap.moved && tapCounts(tap.state, tap.locked);
+      }
       if (wasTap) {
         // taps act like clicks on every non-playing screen
         var p = toGameCoords(t.clientX, t.clientY);
@@ -827,8 +871,21 @@
   // swipe, back swipe, a call banner). Without this the stick stayed held,
   // the hero kept walking, and every tap was ignored: it looked frozen.
   canvas.addEventListener('touchcancel', function (e) {
+    for (var i = 0; i < e.changedTouches.length; i++) delete touchTaps[e.changedTouches[i].identifier];
     if (hasTouchId(e.changedTouches, touchCtl.id)) releaseStick();
   });
+
+  // focus lost (alt-tab, switching apps, the right-click menu): the key-ups
+  // and touch-ends never arrive, so let go of everything and pause a live run
+  function dropAllInput() {
+    for (var k in keys) keys[k] = false;
+    releaseStick();
+    touchTaps = {};
+    if (game.gameState === 'playing') game.gameState = 'paused';
+  }
+  window.addEventListener('blur', dropAllInput);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) dropAllInput(); });
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
   canvas.addEventListener('click', function (e) {
     ensureAudio();
@@ -1450,16 +1507,28 @@
     progressDirty = true; // ship it upstream on the next sync tick
   }
 
+  function sameKind(v, d) {
+    if (Array.isArray(d)) return Array.isArray(v);
+    if (d && typeof d === 'object') return !!v && typeof v === 'object' && !Array.isArray(v);
+    if (typeof d === 'number') return typeof v === 'number' && isFinite(v);
+    return typeof v === typeof d;
+  }
+
   function loadRunData() {
     var def = defaultRunData();
     try {
       var raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return def;
       var data = JSON.parse(raw);
-      for (var k in def) if (!(k in data)) data[k] = def[k];
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return def;
+      var hadLoadout = Array.isArray(data.equippedTomes);
+      // a missing or wrong-typed field (hand-edited or damaged save) falls
+      // back to its default instead of breaking a screen later
+      for (var k in def) if (!sameKind(data[k], def[k])) data[k] = def[k];
+      for (var t in def.shop) if (!sameKind(data.shop[t], 0)) data.shop[t] = 0;
       // migrate players from the old always-on perks: auto-equip their 3
-      // highest-level tomes so their existing investment still applies
-      if (!data.equippedTomes || data.equippedTomes.length === 0) {
+      // highest-level tomes, once (an empty loadout chosen later must stick)
+      if (!hadLoadout) {
         var leveled = ['vit', 'mig', 'swf', 'wis', 'frt']
           .filter(function (id) { return (data.shop[id] || 0) > 0; })
           .sort(function (a, b) { return (data.shop[b] || 0) - (data.shop[a] || 0); });
@@ -3872,10 +3941,13 @@
     if (bgDirty || bgUsedSheet !== useSheet) {
       var old = ctx;
       ctx = bgCache.getContext('2d');
-      ctx.clearRect(0, 0, W, H);
-      drawFloor();
-      drawWalls();
-      ctx = old;
+      // finally: if a draw here threw, every later frame would go into the
+      // cache instead of the screen
+      try {
+        ctx.clearRect(0, 0, W, H);
+        drawFloor();
+        drawWalls();
+      } finally { ctx = old; }
       bgDirty = false;
       bgUsedSheet = useSheet;
     }

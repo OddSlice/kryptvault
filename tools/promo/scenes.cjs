@@ -1,10 +1,10 @@
 // Renders clean promo scenes straight from the game (world only, no HUD), plus
 // transparent hero portraits. Seeded, so the same command gives the same picture.
 // usage: node scenes.cjs <index.html> <outdir> [WxH] [scene-name]
-//   node tools/promo/scenes.cjs index.html promo/scenes
-//   node tools/promo/scenes.cjs index.html promo/scenes/og 1200x675 scene-keyart   (og.png's scene)
+//   node tools/promo/scenes.cjs index.html /tmp/kv/scenes
+//   node tools/promo/scenes.cjs index.html /tmp/kv/scenes/og 1200x675 scene-keyart   (og.png's scene)
 // A scene's picture depends on the scenes rendered before it in the same run, so
-// the press images were made one scene at a time: pass the scene name
+// the promo images were made one scene at a time: pass the scene name
 // (or "portraits" for the hero portraits alone).
 let chromium;
 try { ({ chromium } = require('playwright')); } catch (e) { ({ chromium } = require('/opt/node-tools/node_modules/playwright')); }

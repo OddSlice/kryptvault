@@ -4,9 +4,10 @@ versions
 # balance tooling — dev only
 tools
 
-# not part of the game: schema, notes, and anything secret stay off the public site
+# not part of the game: schema, notes, promo kit (the trailer is 23 MB), and anything secret stay off the public site
 db
 docs
+promo
 neon-import.sql
 *.backup
 *.backup.gz

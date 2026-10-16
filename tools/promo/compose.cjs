@@ -14,6 +14,7 @@ const FONT = process.env.KV_FONT_DIR ? path.resolve(process.env.KV_FONT_DIR) + '
 const FONT_CSS = FONT ? fs.readFileSync(FONT + 'ps2p.css', 'utf8').replace(/https:\/\/fonts\.gstatic\.com\/[^)]*\/([^/)]+\.woff2)/g, (m, f) => 'file://' + FONT + f)
   : "@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');";
 const img = f => 'file://' + path.join(SC, f);
+const wideAt = (f, x, y) => `background-image:url(${img(f)}); background-position:${-x * 4}px ${-y * 4}px;`;
 
 const CSS = (W, H, I) => `
 ${FONT_CSS}
@@ -76,6 +77,28 @@ const FRAME = (B, T) => `
   for (var px = B + step / 2; px < W - B; px += step) { rivet(px, B + T / 2); rivet(px, H - B - T / 2); }
   for (var py = B + step / 2; py < H - B; py += step) { rivet(B + T / 2, py); rivet(W - B - T / 2, py); }
 })();`;
+
+// a seamless tile: brick colours and specks repeat every 4 columns, so the
+// half bricks on the left and right edges match up
+const TILE = (W, H) => `<!doctype html><html><head><meta charset="utf-8"><style>html, body { margin: 0; width: ${W}px; height: ${H}px; overflow: hidden; }</style></head>
+<body><canvas id="frame" width="${W}" height="${H}"></canvas><script>
+(function () {
+  var x = document.getElementById('frame').getContext('2d'), bw = 64, bh = 32, cols = ${W} / bw, rows = ${H} / bh;
+  function hash(a, b) { var h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+  x.fillStyle = '#0e0914'; x.fillRect(0, 0, ${W}, ${H});
+  for (var row = 0; row < rows; row++) {
+    var off = row % 2 ? -bw / 2 : 0;
+    for (var col = 0; col <= cols; col++) {
+      var c = col % cols, bx = col * bw + off, by = row * bh, r = hash(row, c);
+      x.fillStyle = r < 0.45 ? '#1f1828' : (r < 0.9 ? '#261d33' : '#2d233c');
+      x.fillRect(bx + 2, by + 2, bw - 4, bh - 4);
+      x.fillStyle = 'rgba(255,255,255,0.05)'; x.fillRect(bx + 2, by + 2, bw - 4, 4);
+      x.fillStyle = 'rgba(0,0,0,0.3)'; x.fillRect(bx + 2, by + bh - 6, bw - 4, 4);
+      if (hash(c, row + 99) < 0.35) { x.fillStyle = 'rgba(201,162,39,0.35)'; x.fillRect(Math.round(bx + 8 + hash(row, c + 7) * (bw - 20)), Math.round(by + 8 + hash(c + 3, row) * (bh - 18)), 4, 4); }
+    }
+  }
+})();
+</script></body></html>`;
 
 const page = (W, H, B, T, body) => `<!doctype html><html><head><meta charset="utf-8"><style>${CSS(W, H, B + T)}</style></head>
 <body><canvas id="frame" width="${W}" height="${H}"></canvas><div id="stage">${body}</div><script>${FRAME(B, T)}</script></body></html>`;
@@ -163,6 +186,36 @@ const IMAGES = [
     <div class="abs" style="left:0; right:0; bottom:100px; text-align:center;">${logo(88)}</div>
     <div class="abs t sh" style="left:0; right:0; bottom:54px; text-align:center; font-size:24px;">EVERY POWER HAS A PRICE</div>
     <div class="abs t sh muted" style="left:0; right:0; bottom:22px; text-align:center; font-size:14px;">AN 8-BIT ROGUELITE YOU PLAY IN YOUR BROWSER</div>` },
+
+  // itch.io page images. They stay up after this update, so no version badge.
+  // The "-wide" scenes show the whole arena at 4px per game pixel; wideAt()
+  // puts game point (x, y) at the stage's top-left corner.
+  // 7. itch cover (what people see when browsing itch)
+  { name: 'itch-cover-630x500', W: 630, H: 500, B: 12, T: 4, body: `
+    <div class="scene" style="${wideAt('scene-keyart-wide.png', 165, 20)}"></div>
+    ${vignette(0.7)}
+    <div class="layer" style="background: linear-gradient(180deg, rgba(8,4,16,0) 48%, rgba(8,4,16,0.85) 72%, rgba(8,4,16,0.97) 100%);"></div>
+    <div class="abs" style="left:0; right:0; bottom:58px; text-align:center;">${logo(52)}</div>
+    <div class="abs t sh" style="left:0; right:0; bottom:22px; text-align:center; font-size:18px;">EVERY POWER HAS A PRICE</div>` },
+
+  // 8. itch banner (replaces the game's title at the top of its page; 960 is the page width)
+  { name: 'itch-banner-960x300', W: 960, H: 300, B: 14, T: 4, body: `
+    <div class="scene" style="${wideAt('scene-horde-wide.png', 42, 103)}"></div>
+    ${vignette(0.8)}
+    <div class="layer" style="background: linear-gradient(90deg, rgba(8,4,16,0.94) 0, rgba(8,4,16,0.88) 50%, rgba(8,4,16,0.25) 70%, rgba(8,4,16,0.1) 100%);"></div>
+    <div class="abs" style="left:40px; top:78px;">${logo(56)}</div>
+    <div class="abs t sh" style="left:42px; top:168px; font-size:18px;">EVERY POWER HAS A PRICE</div>` },
+
+  // 9. itch wide cover, 21:9 (used when itch features a game on its home page)
+  { name: 'itch-wide-cover-1920x823', W: 1920, H: 823, B: 32, T: 7, body: `
+    <div class="scene" style="${wideAt('scene-keyart-wide.png', 10, 10)}"></div>
+    ${vignette(0.7)}
+    <div class="layer" style="background: linear-gradient(180deg, rgba(8,4,16,0) 50%, rgba(8,4,16,0.85) 74%, rgba(8,4,16,0.97) 100%);"></div>
+    <div class="abs" style="left:0; right:0; bottom:120px; text-align:center;">${logo(120)}</div>
+    <div class="abs t sh" style="left:0; right:0; bottom:52px; text-align:center; font-size:34px;">EVERY POWER HAS A PRICE</div>` },
+
+  // 10. itch page background: Vault bricks that tile seamlessly
+  { name: 'itch-background-tile-256', W: 256, H: 256, tile: true },
 ];
 
 (async () => {
@@ -172,7 +225,7 @@ const IMAGES = [
     if (only && im.name !== only) continue;
     const page2 = await (await browser.newContext({ viewport: { width: im.W, height: im.H } })).newPage();
     const file = path.join(OUT, im.name + '.html');
-    fs.writeFileSync(file, page(im.W, im.H, im.B, im.T, im.body));
+    fs.writeFileSync(file, im.tile ? TILE(im.W, im.H) : page(im.W, im.H, im.B, im.T, im.body));
     await page2.goto('file://' + file);
     await page2.evaluate(() => document.fonts.ready);
     await page2.waitForFunction(() => document.fonts.check('20px "Press Start 2P"') && Array.from(document.images).every(i => i.complete));

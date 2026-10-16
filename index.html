@@ -1168,6 +1168,17 @@
     return isTomeEquipped(id) ? (runData.shop[id] || 0) : 0;
   }
 
+  // opaque blend of hex over base: drawPanel paints the border colour under the
+  // fill, so a see-through fill shows the border through it
+  function mixHex(hex, base, t) {
+    var a = hex.replace('#', ''), b = base.replace('#', ''), out = '#';
+    for (var i = 0; i < 6; i += 2) {
+      var v = Math.round(parseInt(b.slice(i, i + 2), 16) * (1 - t) + parseInt(a.slice(i, i + 2), 16) * t);
+      out += (v < 16 ? '0' : '') + v.toString(16);
+    }
+    return out;
+  }
+
   function hexToRgba(hex, a) {
     var h = hex.replace('#', '');
     var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
@@ -1923,6 +1934,7 @@
         if (kind === 'brick')  { wObj.breakable = true; wObj.bhp = 3; }
         else if (kind === 'ice')    { wObj.breakable = true; wObj.bhp = 2; }
         else if (kind === 'gilded') { wObj.breakable = true; wObj.bhp = 4; }
+        if (wObj.breakable) wObj.bhpMax = wObj.bhp;
         else if (kind === 'sand')   { wObj.soft = true; }
         else if (kind === 'magma')  { wObj.magma = true; }
         out.push(wObj);
@@ -3031,7 +3043,7 @@
           ze.hitFlash = 0.1;
           addDmg(zapDmg, 'static');
           spawnFloatText(ze.x, ze.y, '' + zapDmg, '#f5f76e');
-          game.zaps.push({ x1: p.x, y1: p.y, x2: ze.x, y2: ze.y, t: 0.15 });
+          game.zaps.push({ x1: p.x, y1: p.y, x2: ze.x, y2: ze.y, t: 0.15, jx: rand(-6, 6), jy: rand(-6, 6) });
           if (ze.hp <= 0) {
             var zi = game.enemies.indexOf(ze);
             if (zi !== -1) {
@@ -3444,7 +3456,9 @@
       for (var pb = 0; pb < booms.length; pb++) {
         var boom = booms[pb];
         var br = boom.r || 30;
-        game.shockwaves.push({ x: boom.x, y: boom.y, t: 0.2, color: boom.color || '#9b59b6' });
+        // a ring the size of the blast and no label (an unlabelled ring read as
+        // the red SHOCKWAVE! edge warning); capped, a big chain queues hundreds
+        if (game.shockwaves.length < 60) game.shockwaves.push({ x: boom.x, y: boom.y, t: 0.2, color: boom.color || '#9b59b6', label: '', r: br });
         for (var be = game.enemies.length - 1; be >= 0; be--) {
           var bEn = game.enemies[be];
           var bdx = bEn.x - boom.x, bdy = bEn.y - boom.y;
@@ -4004,7 +4018,7 @@
         ctx.fillStyle = 'rgba(255,255,255,0.28)';
         ctx.fillRect(wl.x + 2, wl.y + 2, 4, 1);
         ctx.fillRect(wl.x + 2, wl.y + 2, 1, 3);
-        var dmg = 3 - (wl.bhp || 3);
+        var dmg = (wl.bhpMax || 3) - (wl.bhp || 0); // hits taken (fresh ice showed 4 cracks)
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         for (var ck = 0; ck <= dmg * 3; ck++) {
           var ckx = wl.x + 2 + ((ck * 7 + wl.x) % Math.max(1, wl.w - 6));
@@ -4143,13 +4157,15 @@
         ctx.globalAlpha = 0.8 * (1 - prog);
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(sw.x, sw.y, prog * (sw.label === 'BOOM!' ? 50 : 80), 0, Math.PI * 2);
+        ctx.arc(sw.x, sw.y, prog * (sw.r || (sw.label === 'BOOM!' ? 50 : 80)), 0, Math.PI * 2);
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
-      ctx.globalAlpha = Math.max(0, 1 - sw.t / 0.6);
-      text(sw.label || 'SHOCKWAVE!', sw.x, sw.y - 24, 8, sw.color || '#ff2d2d', 'center');
-      ctx.globalAlpha = 1;
+      if (sw.label !== '') {
+        ctx.globalAlpha = Math.max(0, 1 - sw.t / 0.6);
+        text(sw.label || 'SHOCKWAVE!', sw.x, sw.y - 24, 8, sw.color || '#ff2d2d', 'center');
+        ctx.globalAlpha = 1;
+      }
     }
   }
 
@@ -4209,13 +4225,14 @@
       drawBombardierSprite(p, bob);
       drew = true;
     } else if (tint) {
-      drew = drawTintedTile(tile, dx, dy + bob, 16, 16, p.facing === -1, tint, skin.chroma ? 0.62 : 0.5);
-      // epic skins get a tight 1px chroma glow that hugs the sprite (not a ring)
-      if (skin.chroma && drew) {
+      // epic skins get a tight 1px chroma glow that hugs the sprite (not a
+      // ring): behind it, 1px out on every side
+      if (skin.chroma) {
         ctx.globalAlpha = 0.25 + 0.15 * Math.sin(game.time * 6);
-        drawTintedTile(tile, dx - 1, dy + bob, 18, 18, p.facing === -1, tint, 1);
+        drawTintedTile(tile, dx - 1, dy - 1 + bob, 18, 18, p.facing === -1, tint, 1);
         ctx.globalAlpha = 1;
       }
+      drew = drawTintedTile(tile, dx, dy + bob, 16, 16, p.facing === -1, tint, skin.chroma ? 0.62 : 0.5);
     } else {
       drew = drawTile(tile, dx, dy + bob, 16, 16, p.facing === -1);
     }
@@ -4394,7 +4411,7 @@
     ctx.stroke();
     // charger telegraph: violent white flashing + shake before the dash
     var tg = e.telegraph > 0 && Math.floor(e.telegraph * 12) % 2 === 0;
-    if (e.telegraph > 0) { bx += randInt(-2, 2); by += randInt(-2, 2); }
+    if (e.telegraph > 0 && game.gameState === 'playing') { bx += randInt(-2, 2); by += randInt(-2, 2); }
     if (e.kind === 'summoner') {
       drawNecromancer(e, bx, by, dsr, tg);
       return;
@@ -4624,8 +4641,10 @@
   function renderWorld() {
     ctx.save();
     // screen shake
+    game.shakeX = game.shakeY = 0;
     if (game.shakeTimer > 0 && prefs.shake) {
-      ctx.translate(randInt(-3, 3), randInt(-3, 3));
+      game.shakeX = randInt(-3, 3); game.shakeY = randInt(-3, 3);
+      ctx.translate(game.shakeX, game.shakeY);
     }
     drawBackground();
     // spike-trap zones sit on the floor, under everything that walks on it
@@ -4676,7 +4695,7 @@
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(z.x1, z.y1);
-      var zmx = (z.x1 + z.x2) / 2 + rand(-6, 6), zmy = (z.y1 + z.y2) / 2 + rand(-6, 6);
+      var zmx = (z.x1 + z.x2) / 2 + (z.jx || 0), zmy = (z.y1 + z.y2) / 2 + (z.jy || 0); // fixed per bolt: no flicker behind pause
       ctx.lineTo(zmx, zmy);
       ctx.lineTo(z.x2, z.y2);
       ctx.stroke();
@@ -4812,7 +4831,8 @@
     }
     drawOrb(cx, cy, r, ratio, '#ff3b3b', '#6a0010');
     text(String(Math.max(0, Math.ceil(p.hp))), cx, cy - 5, 6, '#ffffff', 'center');
-    text('/' + Math.round(p.maxHp), cx, cy + 2, 6, '#ffd0d0', 'center');
+    var mx = '/' + Math.round(p.maxHp);
+    text(mx, cx, cy + 2, mx.length > 4 ? 5 : 6, '#ffd0d0', 'center'); // 4-digit max HP: smaller, so it stays in the orb
   }
 
   // the ascendancy ability: a socket that charges up; locked until wave 10
@@ -4917,7 +4937,8 @@
     text(lv, W - 4 - lw / 2, 7, 6, '#cdf4ff', 'center');
 
     // life under the hero, where your eyes already are
-    var hbw = 24, hbx = Math.round(p.x - hbw / 2), hby = Math.round(p.y + p.h / 2 + 3);
+    // (offset by the screen shake, like the hero it's attached to)
+    var hbw = 24, hbx = Math.round(p.x - hbw / 2) + (game.shakeX || 0), hby = Math.round(p.y + p.h / 2 + 3) + (game.shakeY || 0);
     ctx.fillStyle = '#000';
     ctx.fillRect(hbx - 1, hby - 1, hbw + 2, 5);
     ctx.fillStyle = '#3a0a10';
@@ -5237,7 +5258,12 @@
   function uiBegin() {
     var s = game.gameState;
     if (uiFocusState !== s) {
-      if (uiFocusState && uiButtons[uiFocus]) uiFocusMem[uiFocusState] = uiButtons[uiFocus].id;
+      // remember where the cursor was, unless it was BACK (Enter would then
+      // leave the screen the moment it reopens)
+      if (uiFocusState && uiButtons[uiFocus]) {
+        if (uiButtons[uiFocus].id === 'back') delete uiFocusMem[uiFocusState];
+        else uiFocusMem[uiFocusState] = uiButtons[uiFocus].id;
+      }
       uiFocus = -1;
       uiWantId = UI_NO_FOCUS_MEMORY[s] ? null : (uiFocusMem[s] || null);
       uiFocusState = s;
@@ -5394,8 +5420,12 @@
       var cr = menuCritters[ci];
       cr.x += cr.vx * frameDt;
       cr.y += cr.vy * frameDt;
-      if (cr.x < 16 || cr.x > W - 16) { cr.vx *= -1; cr.flip = cr.vx < 0; }
-      if (cr.y < 16 || cr.y > H - 16) cr.vy *= -1;
+      // bounce back inside (flipping in place after a long frame left them
+      // flickering at the wall for good)
+      if (cr.x < 16) { cr.x = 16; cr.vx = Math.abs(cr.vx); cr.flip = false; }
+      else if (cr.x > W - 16) { cr.x = W - 16; cr.vx = -Math.abs(cr.vx); cr.flip = true; }
+      if (cr.y < 16) { cr.y = 16; cr.vy = Math.abs(cr.vy); }
+      else if (cr.y > H - 16) { cr.y = H - 16; cr.vy = -Math.abs(cr.vy); }
       if (!drawTile(cr.tile, Math.round(cr.x - 8), Math.round(cr.y - 8), 16, 16, cr.flip)) {
         ctx.fillStyle = '#666677';
         ctx.fillRect(Math.round(cr.x - 5), Math.round(cr.y - 5), 10, 10);
@@ -5438,6 +5468,13 @@
     uiButton({ id: 'back', x: 6, y: 6, w: 54, h: 16, icon: 'back', label: 'BACK', size: 6, onClick: goBack });
   }
 
+  // short coin counts for tight spots: 149K, 30.2M (8 digits ran into labels)
+  function fmtCoins(c) {
+    c = Math.round(c);
+    if (c >= 1e6) return (c >= 1e8 ? Math.round(c / 1e6) : Math.round(c / 1e5) / 10) + 'M';
+    if (c >= 1e5) return Math.round(c / 1e3) + 'K';
+    return '' + c;
+  }
   function fmtKills(k) {
     if (k >= 1000) {
       var v = k / 1000;
@@ -5497,7 +5534,7 @@
     var y = 98, gap = 26, bh = 22;
     uiButton({ id: 'shop', x: mx, y: y, w: mw, h: bh, icon: 'vault', label: 'THE VAULT',
       onClick: function () { game.gameState = 'shop'; },
-      right: function (xr, cy) { drawCoinAmount(xr, cy - 4, Math.round(runData.coins), 'right', 8); } });
+      right: function (xr, cy) { drawCoinAmount(xr, cy - 4, fmtCoins(runData.coins), 'right', 8); } });
 
     var newSkin = affordableSkinExists();
     uiButton({ id: 'skins', x: mx, y: y + gap, w: mw, h: bh, icon: 'skins', label: 'SKINS',
@@ -5531,7 +5568,7 @@
         if (runData.name) {
           text(playerTag(), b.x + 40, b.y + 8, 8, UI.cyan);
           if (runData.totalRuns > 0) {
-            text('BEST: W' + pad(runData.bestWave, 2) + ', ' + fmtKills(runData.bestKills) + ' KILLS', b.x + 40, b.y + 22, 6, UI.muted);
+            text('BEST W' + pad(runData.bestWave, 2) + ', ' + fmtKills(runData.bestKills) + ' KILLS', b.x + 40, b.y + 22, 6, UI.muted);
           } else {
             text('NO RUNS YET', b.x + 40, b.y + 22, 6, UI.muted);
           }
@@ -5837,8 +5874,8 @@
     drawPanel(rx, ry, rw, 22, { fill: 'rgba(16,10,18,0.95)', border: '#3e2a3a' });
     drawHeroIcon(currentClass, rx + 6, ry + 3, 16);
     text(classDef(currentClass).name, rx + 28, ry + 8, 8, classTextColor(currentClass));
-    text('COINS EARNED', rx + rw - 72, ry + 9, 6, UI.muted, 'right');
-    drawCoinAmount(rx + rw - 8, ry + 7, '+' + Math.round(game.coinsEarned), 'right', 8);
+    var cew = drawCoinAmount(rx + rw - 8, ry + 7, '+' + Math.round(game.coinsEarned), 'right', 8);
+    text('COINS EARNED', rx + rw - 8 - cew - 6, ry + 9, 6, UI.muted, 'right'); // clear of a 7-digit amount
 
     // ----- damage attribution: what actually carried the run -----
     var dy = 132;
@@ -5862,6 +5899,20 @@
         ctx.fillStyle = cols[parts[si].k];
         ctx.fillRect(sx, barY, segW, barH);
         sx += segW;
+      }
+      // all seven sources don't fit one line (it ran off both screen edges):
+      // fold the smallest into OTHER until the legend fits the panel
+      var legendW = function (ps) {
+        var w = -12;
+        for (var q = 0; q < ps.length; q++) w += 9 + measureText(labels[ps[q].k] + ' ' + ps[q].pct + '%', 6) + 12;
+        return w;
+      };
+      while (parts.length > 2 && legendW(parts) > rw - 16) {
+        var mi = -1;
+        for (var q = 0; q < parts.length; q++) if (parts[q].k !== 'other' && (mi < 0 || parts[q].pct < parts[mi].pct)) mi = q;
+        var gone = parts.splice(mi, 1)[0], oth = null;
+        for (q = 0; q < parts.length; q++) if (parts[q].k === 'other') oth = parts[q];
+        if (oth) oth.pct += gone.pct; else parts.push({ k: 'other', pct: gone.pct });
       }
       var lstrs = parts.map(function (pp) { return labels[pp.k] + ' ' + pp.pct + '%'; });
       var lw = 0;
@@ -5993,6 +6044,7 @@
           var rEvo = EVOLUTIONS[re];
           if (game.player.upgradesTaken[rEvo.id]) continue;
           if (rEvo.needs.indexOf(c.upgrade.id) === -1) continue;
+          if (game.player.upgradesTaken[c.upgrade.id]) continue; // already have this half
           var otherIng = rEvo.needs[0] === c.upgrade.id ? rEvo.needs[1] : rEvo.needs[0];
           if (game.player.upgradesTaken[otherIng]) {
             recipeHint = 'UNLOCKS: ' + rEvo.name;
@@ -6256,7 +6308,7 @@
         uiButton({ id: 'equip_' + item.id, x: x, y: ry, w: w - upW - 4, h: 30,
           onClick: function () { toggleTomeEquip(idx); },
           draw: function (b, hot) {
-            var fill = hot ? UI.panelHi : (equipped ? hexToRgba(item.color, 0.10) : 'rgba(14,14,27,0.95)');
+            var fill = hot ? UI.panelHi : (equipped ? mixHex(item.color, UI.panel, 0.12) : 'rgba(14,14,27,0.95)');
             drawPanel(b.x, b.y, b.w, b.h, { fill: fill, border: hot ? UI.gold : (equipped ? item.color : UI.line) });
             if (equipped || hot) { ctx.fillStyle = hot ? UI.gold : item.color; ctx.fillRect(b.x + 1, b.y + 2, 2, b.h - 4); }
             drawTomeIcon(item.color, b.x + 10, b.y + 8, 14);

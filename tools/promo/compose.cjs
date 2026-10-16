@@ -91,7 +91,7 @@ const IMAGES = [
     <div class="abs badge t" style="top:34px; right:34px; font-size:30px;">UPDATE 1.2.1 <span class="gold">LIVE!</span></div>
     <div class="abs" style="left:0; right:0; bottom:176px; text-align:center;">${logo(150)}</div>
     <div class="abs t sh" style="left:0; right:0; bottom:104px; text-align:center; font-size:40px;">EVERY POWER HAS A PRICE</div>
-    <div class="abs t sh muted" style="left:0; right:0; bottom:44px; text-align:center; font-size:22px;">PLAY FREE IN YOUR BROWSER<span class="dot"></span><span class="gold">KRYPTVAULT.VERCEL.APP</span></div>` },
+    <div class="abs t sh muted" style="left:0; right:0; bottom:44px; text-align:center; font-size:22px;">PLAY FREE IN YOUR BROWSER<span class="dot"></span><span class="gold">ODDSLICE.ITCH.IO</span></div>` },
 
   // 2. what's new in 1.2.1
   { name: 'kryptvault-update-1.2.1-1920x1080', W: 1920, H: 1080, B: 40, T: 8, body: `
@@ -110,7 +110,7 @@ const IMAGES = [
         <div class="abs t sh gold" style="left:58px; top:0; font-size:32px;">${f[0]}</div>
         <div class="abs t sh muted" style="left:58px; top:50px; font-size:18px;">${f[1]}</div>
       </div>`).join('')}
-    <div class="abs t sh" style="left:80px; bottom:52px; font-size:24px;">PLAY FREE AT <span class="gold">KRYPTVAULT.VERCEL.APP</span></div>` },
+    <div class="abs t sh" style="left:80px; bottom:52px; font-size:24px;">PLAY FREE AT <span class="gold">ODDSLICE.ITCH.IO</span></div>` },
 
   // 3. the Vault Keeper
   { name: 'kryptvault-boss-1920x1080', W: 1920, H: 1080, B: 40, T: 8, body: `
@@ -133,7 +133,7 @@ const IMAGES = [
     <div class="abs" style="left:0; right:0; top:62px; text-align:center;">${logo(88).replace(/KRYPTVAULT/g, 'HOW FAR CAN YOU GO?')}</div>
     <div class="abs t sh muted" style="left:0; right:0; top:200px; text-align:center; font-size:24px;">ENDLESS WAVES AFTER 50. ONE GLOBAL LEADERBOARD.</div>
     <div class="abs" style="left:0; right:0; bottom:98px; text-align:center;">${logo(72)}</div>
-    <div class="abs t sh muted" style="left:0; right:0; bottom:40px; text-align:center; font-size:22px;">PLAY FREE IN YOUR BROWSER<span class="dot"></span><span class="gold">KRYPTVAULT.VERCEL.APP</span></div>` },
+    <div class="abs t sh muted" style="left:0; right:0; bottom:40px; text-align:center; font-size:22px;">PLAY FREE IN YOUR BROWSER<span class="dot"></span><span class="gold">ODDSLICE.ITCH.IO</span></div>` },
 
   // 5. the roster
   { name: 'kryptvault-heroes-1920x1080', W: 1920, H: 1080, B: 40, T: 8, body: `
@@ -152,7 +152,7 @@ const IMAGES = [
         <div class="abs t sh muted" style="left:0; right:0; top:390px; text-align:center; font-size:16px;">${h[3]}</div>
         <div class="abs t sh muted" style="left:0; right:0; top:428px; text-align:center; font-size:16px;">${h[4]}</div>
       </div>`).join('')}
-    <div class="abs t sh" style="left:0; right:0; bottom:50px; text-align:center; font-size:26px;">${logo(26)}<span class="dot"></span>PLAY FREE AT <span class="gold">KRYPTVAULT.VERCEL.APP</span></div>` },
+    <div class="abs t sh" style="left:0; right:0; bottom:50px; text-align:center; font-size:26px;">${logo(26)}<span class="dot"></span>PLAY FREE AT <span class="gold">ODDSLICE.ITCH.IO</span></div>` },
 
   // 6. link preview (og:image), drawn from a 1200x675 render so pixels stay square
   { name: 'og', W: 1200, H: 630, B: 24, T: 5, body: `

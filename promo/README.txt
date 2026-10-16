@@ -1,6 +1,6 @@
 KRYPTVAULT PROMO KIT (update 1.2.1)
 
-Play: https://kryptvault.vercel.app
+Play: https://oddslice.itch.io/
 
 video/
   kryptvault-promo-1.2.1.mp4        30-second trailer, 1920x1080, 60fps, with sound.

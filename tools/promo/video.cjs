@@ -101,7 +101,7 @@ const DIRECTOR = () => {
   A.forEach(function (row, y) { for (var x = 0; x < row.length; x++) if (row[x] !== '.') r += '<rect x="' + x + '" y="' + y + '" width="1" height="1" fill="' + (row[x] === 'X' ? '#000' : '#fff') + '"/>'; });
   ov.innerHTML = '<svg id="cur" viewBox="0 0 12 19" shape-rendering="crispEdges">' + r + '</svg><div id="ring"></div><div id="cap"></div>' +
     '<canvas id="wipe" width="1920" height="1080"></canvas><div id="veil"></div><div id="end"><div id="logo">KRYPTVAULT</div><div id="cta">PLAY KRYPTVAULT NOW</div>' +
-    '<div id="badge">UPDATE 1.2.1 LIVE!</div><div id="url">KRYPTVAULT.VERCEL.APP</div></div>';
+    '<div id="badge">UPDATE 1.2.1 LIVE!</div><div id="url">ODDSLICE.ITCH.IO</div></div>';
   document.body.appendChild(ov);
   var $ = function (id) { return document.getElementById(id); };
   var wctx = $('wipe').getContext('2d');

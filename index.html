@@ -1926,6 +1926,17 @@
       ent.x = clamp(ent.x, ent.w / 2, W - ent.w / 2);
       ent.y = clamp(ent.y, ent.h / 2, H - ent.h / 2);
     }
+    if (!boxHitsWall(ent.x, ent.y, ent.w, ent.h)) return;
+    // squeezed between two walls (the nudges bounced back and forth): search
+    // outward for the nearest free spot instead of leaving it stuck inside
+    var ox = ent.x, oy = ent.y;
+    for (var r = 4; r <= 200; r += 4) {
+      for (var a = 0; a < 16; a++) {
+        var nx = clamp(ox + Math.cos(a * Math.PI / 8) * r, ent.w / 2, W - ent.w / 2);
+        var ny = clamp(oy + Math.sin(a * Math.PI / 8) * r, ent.h / 2, H - ent.h / 2);
+        if (!boxHitsWall(nx, ny, ent.w, ent.h)) { ent.x = nx; ent.y = ny; return; }
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2090,6 +2101,7 @@
     game.floatTexts = [];
     game.pickups = [];
     game.hitStop = 0;
+    game.lastHitStop = -1;
     game.zaps = [];
     game.beams = [];
     game.zones = [];
@@ -2376,10 +2388,18 @@
   // ---------------------------------------------------------------------------
   // SHOOTING
   // ---------------------------------------------------------------------------
-  function findNearestEnemy(px, py) {
+  // a weaker chill never replaces a stronger one that is still running
+  // (frost shots used to cut the frost nova's 60% slow down to 30%)
+  function chill(e, amt, secs) {
+    if (!(e.slowT > 0) || amt >= (e.slowAmt || 0)) e.slowAmt = amt;
+    e.slowT = Math.max(e.slowT || 0, secs);
+  }
+
+  function findNearestEnemy(px, py, skip) {
     var best = null, bestD = Infinity;
     for (var i = 0; i < game.enemies.length; i++) {
       var e = game.enemies[i];
+      if (skip && skip.indexOf(e) !== -1) continue;
       var dx = e.x - px, dy = e.y - py;
       var d = dx * dx + dy * dy;
       if (d < bestD) { bestD = d; best = e; }
@@ -2406,7 +2426,7 @@
       bounces: (crit && p.deathseeker) ? 1 : p.ricochet,
       // homing strength: 0.08 base, +0.04 per extra pick; mage has an
       // innate 0.06 without the upgrade.
-      homing: p.homing > 0 ? (0.08 + (p.homing - 1) * 0.04) : (p.homingBase || 0),
+      homing: Math.max(p.homingBase || 0, p.homing > 0 ? (0.08 + (p.homing - 1) * 0.04) : 0),
       hitSet: []
     });
   }
@@ -2506,17 +2526,22 @@
     });
   }
 
+  // raise toward a cap / lower toward a floor, never the wrong way: an
+  // evolution can already be past a regular card's cap
+  function capUp(v, inc, cap) { return Math.max(v, Math.min(cap, v + inc)); }
+  function capDown(v, dec, floor) { return Math.min(v, Math.max(floor, v - dec)); }
+
   function applyUpgrade(u) {
     var p = game.player;
     p.upgradesTaken[u.id] = (p.upgradesTaken[u.id] || 0) + 1;
     switch (u.id) {
       // every upgrade carries a con; clamps keep heavy stacking survivable
-      case 'multishot': p.projectiles = Math.min(5, p.projectiles + 1);
+      case 'multishot': p.projectiles = capUp(p.projectiles, 1, p.bulletstorm ? 7 : 5);
                         p.damage = Math.max(5, Math.round(p.damage * 0.88)); break;
-      case 'atkspeed':  p.attackCooldown = Math.max(0.2, p.attackCooldown - 0.1);
+      case 'atkspeed':  p.attackCooldown = capDown(p.attackCooldown, 0.1, 0.2);
                         p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.9)); break;
       case 'damage':    p.damage += 15;
-                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
+                        p.attackCooldown = capUp(p.attackCooldown, 0.05, 1.6); break;
       case 'health':    p.maxHp += 30;
                         // heal half of what's missing — a real panic button
                         p.hp = Math.min(p.maxHp, p.hp + Math.round((p.maxHp - p.hp) * 0.5 * p.healMult));
@@ -2532,24 +2557,24 @@
       case 'xpmagnet':  p.xpMult = Math.min(3, p.xpMult * 1.2);
                         game.curseSpeedMult *= 1.04; break;
       case 'shotgun':   p.shotgun += 1;
-                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.1); break;
+                        p.attackCooldown = capUp(p.attackCooldown, 0.1, 1.6); break;
       case 'homing':    p.homing += 1;
                         p.shotSpeed = Math.max(100, Math.round(p.shotSpeed * 0.85)); break;
       case 'shield':    p.shield += 1; rebuildOrbs();
                         p.speed = Math.max(40, p.speed - 8); break;
       case 'frost':     p.frost += 1;
                         p.damage = Math.max(5, Math.round(p.damage * 0.9)); break;
-      case 'crit':      p.critChance = Math.min(0.6, p.critChance + 0.10);
+      case 'crit':      p.critChance = capUp(p.critChance, 0.10, 0.6);
                         p.damage = Math.max(5, Math.round(p.damage * 0.95)); break;
       case 'armor':     p.armor = Math.min(0.5, p.armor + 0.10);
                         p.speed = Math.max(40, p.speed - 5); break;
       case 'static':    p.staticLvl += 1;
-                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
+                        p.attackCooldown = capUp(p.attackCooldown, 0.05, 1.6); break;
       case 'velocity':  p.shotSpeed = Math.round(p.shotSpeed * 1.25);
                         p.maxHp = Math.max(30, p.maxHp - 10);
                         p.hp = Math.min(p.hp, p.maxHp); break;
       case 'heavyshot': p.projSize += 1;
-                        p.attackCooldown = Math.min(1.6, p.attackCooldown + 0.05); break;
+                        p.attackCooldown = capUp(p.attackCooldown, 0.05, 1.6); break;
       // cursed upgrades — the downside is permanent for the rest of the run
       case 'lucky':       p.lucky += 1; game.curseHpMult *= 1.2; break;
       case 'darkpact':    p.pactLvl += 1; game.cultistLevel++; break;
@@ -2558,7 +2583,7 @@
                           p.maxHp = Math.max(30, p.maxHp - 20);
                           p.hp = Math.min(p.hp, p.maxHp); break;
       case 'hastepact': p.speed = Math.round(p.speed * 1.15);
-                        p.attackCooldown = Math.max(0.2, p.attackCooldown * 0.87);
+                        p.attackCooldown = Math.min(p.attackCooldown, Math.max(0.2, p.attackCooldown * 0.87));
                         game.spawnHaste *= 1.15; break;
       case 'retribution': p.retribution += 1;
                         p.maxHp = Math.max(30, p.maxHp - 15);
@@ -2663,7 +2688,7 @@
       case 'juggernaut': p.ascendDR = 0.10; break;
       // berserker passive lives in spawnProjectile (needs live HP)
       case 'phantom':    p.speed += 15; break;
-      case 'assassin':   p.critChance = 0.2; break;
+      case 'assassin':   p.critChance = Math.max(p.critChance, 0.2); break; // never lowers earlier picks
       case 'frostmage':  p.frost = Math.max(p.frost, 1); break;
       case 'lightmage':  p.homingBase = Math.max(p.homingBase, 0.10); break;
       case 'sniper':     p.shotSpeed = Math.round(p.shotSpeed * 1.25); break;
@@ -2740,8 +2765,7 @@
           ddx = e.x - p.x; ddy = e.y - p.y;
           if (ddx * ddx + ddy * ddy < 90 * 90) {
             e.frozenT = 2;
-            e.slowT = Math.max(e.slowT || 0, 3);
-            e.slowAmt = 0.6;
+            chill(e, 0.6, 3);
           }
         }
         spawnRingParticles(p.x, p.y, a.color);
@@ -2794,6 +2818,10 @@
           e = game.enemies[i];
           if (e.isBoss) { e.hp -= 120; addDmg(120, 'ability'); e.hitFlash = 0.08; continue; }
           game.pactBooms.push({ x: e.x, y: e.y, dmg: 90, r: 40, color: '#ffb03a' });
+        }
+        if (game.boss && game.boss.hp <= 0) {
+          var dbi = game.enemies.indexOf(game.boss);
+          if (dbi !== -1) killBoss(dbi, game.boss);
         }
         game.shakeTimer = 0.35;
         break;
@@ -2895,6 +2923,9 @@
     }
 
     // ----- player movement -----
+    // movement refuses any step into a wall, so a hero already inside one
+    // could never walk out: get them free first
+    if (boxHitsWall(p.x, p.y, p.w, p.h)) pushOutOfWalls(p);
     var dx = 0, dy = 0;
     if (keys['KeyW'] || keys['ArrowUp']) dy -= 1;
     if (keys['KeyS'] || keys['ArrowDown']) dy += 1;
@@ -2988,8 +3019,10 @@
       // scan was O(projectiles x enemies) and the lag is imperceptible.
       if (pr.homing > 0) {
         pr.htT = (pr.htT || 0) - dt;
-        if (!pr.ht || pr.ht.hp <= 0 || pr.htT <= 0) {
-          pr.ht = findNearestEnemy(pr.x, pr.y);
+        // never steer back onto a monster this shot already went through:
+        // piercing shots used to circle it for good and pile up
+        if (!pr.ht || pr.ht.hp <= 0 || pr.htT <= 0 || pr.hitSet.indexOf(pr.ht) !== -1) {
+          pr.ht = findNearestEnemy(pr.x, pr.y, pr.hitSet);
           pr.htT = 0.1;
         }
         var ht = pr.ht;
@@ -2999,8 +3032,9 @@
           var diff = desired - cur;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
-          var step = diff * pr.homing;
-          var maxStep = 4 * Math.PI / 180;
+          // per second, not per frame: at 144 Hz it used to turn 2.4x harder
+          var step = diff * Math.min(1, pr.homing * dt * 60);
+          var maxStep = 4 * Math.PI / 180 * dt * 60;
           if (step > maxStep) step = maxStep;
           else if (step < -maxStep) step = -maxStep;
           var na = cur + step;
@@ -3032,8 +3066,7 @@
                 var ie = game.enemies[icn];
                 var idx2 = ie.x - wcx, idy2 = ie.y - wcy;
                 if (idx2 * idx2 + idy2 * idy2 < 55 * 55) {
-                  ie.slowT = Math.max(ie.slowT || 0, 2);
-                  ie.slowAmt = Math.max(ie.slowAmt || 0, 0.5);
+                  chill(ie, 0.5, 2);
                 }
               }
             } else if (hitWall.kind === 'gilded') {
@@ -3076,8 +3109,12 @@
       var ed = Math.sqrt(edx * edx + edy * edy) || 1;
       var chase = e.speed;
       if (e.type === 'cultist' || e.type === 'caster') {
-        if (ed < 70) chase = -e.speed * 0.7;       // back away
-        else if (ed < 110) chase = 0;              // hold range
+        // keep range only once on screen: off-screen they never came in and
+        // the edge timer blew them up in the player's face
+        if (e.x > 16 && e.x < W - 16 && e.y > 16 && e.y < H - 16) {
+          if (ed < 70) chase = -e.speed * 0.7;     // back away
+          else if (ed < 110) chase = 0;            // hold range
+        }
         e.shootTimer -= dt;
         if (e.shootTimer <= 0 && ed < 220) {
           e.shootTimer = e.type === 'caster' ? 2.2 : Math.max(1.2, 2.4 - game.cultistLevel * 0.2);
@@ -3263,6 +3300,16 @@
       }
       // both axes blocked: stay put this frame
 
+      // bosses never leave the arena once they're in (shots die at the edge,
+      // so an off-screen boss couldn't be hit); they spawn above it, so wait
+      if (e.isBoss) {
+        if (e.x >= e.w / 2 && e.x <= W - e.w / 2 && e.y >= e.h / 2 && e.y <= H - e.h / 2) e.entered = true;
+        if (e.entered) {
+          e.x = clamp(e.x, e.w / 2, W - e.w / 2);
+          e.y = clamp(e.y, e.h / 2, H - e.h / 2);
+        }
+      }
+
       // screen-edge danger countdown (bosses are immune)
       if (!e.isBoss) {
         var nearEdge = (e.x < 10 || e.x > W - 10 || e.y < 10 || e.y > H - 10);
@@ -3380,8 +3427,7 @@
           if (zdx * zdx + zdy * zdy < z.r * z.r) {
             zEn.hp -= 25;
             addDmg(25, 'ability');
-            zEn.slowT = Math.max(zEn.slowT || 0, 0.8);
-            zEn.slowAmt = Math.max(zEn.slowAmt || 0, 0.4);
+            chill(zEn, 0.4, 0.8);
             zEn.hitFlash = 0.08;
             if (zEn.hp <= 0) { if (zEn.isBoss) killBoss(ze, zEn); else killEnemy(ze, zEn); }
           }
@@ -3444,8 +3490,7 @@
           }
           // frost shots chill whatever they hit
           if (p.frost > 0) {
-            en.slowT = 1.0;
-            en.slowAmt = Math.min(0.6, 0.3 + (p.frost - 1) * 0.15);
+            chill(en, Math.min(0.6, 0.3 + (p.frost - 1) * 0.15), 1.0);
           }
           proj.hitSet.push(en);
           if (en.hp <= 0) {
@@ -3489,6 +3534,13 @@
       for (var oi = 0; oi < p.orbs.length; oi++) {
         var orb = p.orbs[oi];
         orb.angle += p.orbSpeed * dt;
+        // forget expired per-monster cooldowns now and then (the map grew by
+        // one entry per monster ever touched, for the whole run)
+        orb.pruneT = (orb.pruneT || 0) + dt;
+        if (orb.pruneT > 2) {
+          orb.pruneT = 0;
+          for (var hk in orb.hitCd) if (orb.hitCd[hk] < game.time) delete orb.hitCd[hk];
+        }
         orb.x = p.x + Math.cos(orb.angle) * p.orbRadius;
         orb.y = p.y + Math.sin(orb.angle) * p.orbRadius;
         // collide with enemies (descending so splices are safe)
@@ -3533,6 +3585,9 @@
   }
 
   function killEnemy(index, en) {
+    // the run already ended this frame and was saved: a kill now would show
+    // on the results screen but never reach the save or the leaderboard
+    if (game.gameState === 'gameover') { game.enemies.splice(index, 1); return; }
     spawnDeathParticles(en.x, en.y, en.color);
     var p = game.player;
     gainXP((en.xpVal || en.maxHp / 5) * p.xpMult);
@@ -3548,7 +3603,12 @@
     game.score++;
     game.waveKills++;
     game.coinsEarned += (1 + Math.floor(game.wave / 5)) * (1 + 0.25 * tomeLevel('frt')) * p.coinMult;
-    game.hitStop = Math.max(game.hitStop, 0.03); // tiny punch on every kill
+    // a tiny punch on a kill, at most every 0.25s: on every kill, chain kills
+    // froze the whole game (two dead frames per kill frame)
+    if (!(game.time - game.lastHitStop < 0.25)) {
+      game.hitStop = Math.max(game.hitStop, 0.03);
+      game.lastHitStop = game.time;
+    }
     maybeDropPickup(en.x, en.y);
     // dark pact: kills detonate (queued — resolved next tick so we never
     // recurse into the enemies array mid-splice)
@@ -3650,6 +3710,7 @@
   }
 
   function killBoss(index, en) {
+    if (game.gameState === 'gameover') { game.enemies.splice(index, 1); game.boss = null; return; }
     game.lastBossName = en.name || 'THE BOSS';
     bossExplosion(en.x, en.y);
     if (en.name) spawnFloatText(en.x, en.y - 22, en.name + ' SLAIN', en.color);

@@ -225,8 +225,47 @@
   var _skinCtx = _skinBuf.getContext('2d');
   _skinCtx.imageSmoothingEnabled = false;
 
-  function drawTintedTile(tile, dx, dy, dw, dh, flip, tint, alpha) {
+  // a monster's tint never changes, so each tile+tint is coloured once and
+  // reused: re-tinting one scratch canvas per monster per frame made the GPU
+  // re-upload it every time (150+ times a frame from wave 11 on)
+  var _tintCache = {}, _tintCacheN = 0;
+  function tintedTile(tile, tint, alpha) {
+    var key = tile.x + ',' + tile.y + ',' + tint + ',' + alpha;
+    var c = _tintCache[key];
+    if (c) return c;
+    if (_tintCacheN >= 200) { _tintCache = {}; _tintCacheN = 0; }
+    c = document.createElement('canvas');
+    c.width = 16; c.height = 16;
+    var tc = c.getContext('2d');
+    tc.drawImage(spritesheet, tile.x, tile.y, 16, 16, 0, 0, 16, 16);
+    tc.globalCompositeOperation = 'source-atop';
+    tc.globalAlpha = alpha;
+    tc.fillStyle = tint;
+    tc.fillRect(0, 0, 16, 16);
+    _tintCache[key] = c; _tintCacheN++;
+    return c;
+  }
+
+  // cached: the tint is fixed (monsters); the hero's chroma skin changes
+  // colour every frame, so it keeps tinting the scratch canvas
+  function drawTintedTile(tile, dx, dy, dw, dh, flip, tint, alpha, cached) {
     if (!tile || useProceduralSprites || !sheetReady) return false;
+    var src = cached ? tintedTile(tile, tint, alpha) : _skinBuf;
+    if (!cached) tintScratch(tile, tint, alpha);
+    ctx.imageSmoothingEnabled = false;
+    if (flip) {
+      ctx.save();
+      ctx.translate(dx + dw, dy);
+      ctx.scale(-1, 1);
+      ctx.drawImage(src, 0, 0, 16, 16, 0, 0, dw, dh);
+      ctx.restore();
+    } else {
+      ctx.drawImage(src, 0, 0, 16, 16, dx, dy, dw, dh);
+    }
+    return true;
+  }
+
+  function tintScratch(tile, tint, alpha) {
     _skinCtx.clearRect(0, 0, 16, 16);
     _skinCtx.globalCompositeOperation = 'source-over';
     _skinCtx.globalAlpha = 1;
@@ -237,17 +276,6 @@
     _skinCtx.fillRect(0, 0, 16, 16);
     _skinCtx.globalAlpha = 1;
     _skinCtx.globalCompositeOperation = 'source-over';
-    ctx.imageSmoothingEnabled = false;
-    if (flip) {
-      ctx.save();
-      ctx.translate(dx + dw, dy);
-      ctx.scale(-1, 1);
-      ctx.drawImage(_skinBuf, 0, 0, 16, 16, 0, 0, dw, dh);
-      ctx.restore();
-    } else {
-      ctx.drawImage(_skinBuf, 0, 0, 16, 16, dx, dy, dw, dh);
-    }
-    return true;
   }
 
   // ---------------------------------------------------------------------------
@@ -4340,7 +4368,7 @@
     if (e.type === 'splitter' || e.type === 'mini') {
       var ss = e.type === 'splitter' ? 20 : 10;
       var sdrew = e.skinTint
-        ? drawTintedTile(e.tile, Math.round(e.x - ss / 2), Math.round(e.y - ss / 2), ss, ss, false, e.skinTint, e.skinAlpha || 0.3)
+        ? drawTintedTile(e.tile, Math.round(e.x - ss / 2), Math.round(e.y - ss / 2), ss, ss, false, e.skinTint, e.skinAlpha || 0.3, true)
         : drawTile(e.tile, Math.round(e.x - ss / 2), Math.round(e.y - ss / 2), ss, ss, false);
       if (!sdrew) {
         ctx.fillStyle = e.hitFlash > 0 ? '#fff' : e.color;
@@ -4359,7 +4387,7 @@
       return;
     }
     var drew = e.skinTint
-      ? drawTintedTile(e.tile, dx, dy, 16, 16, false, e.skinTint, e.skinAlpha || 0.3)
+      ? drawTintedTile(e.tile, dx, dy, 16, 16, false, e.skinTint, e.skinAlpha || 0.3, true)
       : drawTile(e.tile, dx, dy, 16, 16, false);
     if (drew) {
       if (e.hitFlash > 0) {

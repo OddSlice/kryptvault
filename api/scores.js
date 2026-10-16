@@ -1,5 +1,5 @@
 // Global leaderboard.
-//   GET  /api/scores  -> top 80 normal-mode runs (the game keeps each player's best)
+//   GET  /api/scores  -> each player's best normal-mode run, top 80
 //   POST /api/scores  -> submit a run; the scores_validate trigger checks it
 import { query } from './_db.js';
 
@@ -8,9 +8,15 @@ const COLUMNS = ['name', 'wave', 'kills', 'level', 'cls', 'mode', 'disc', 'playe
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     try {
+      // each player's best run only: 80 raw rows could be mostly one grinder,
+      // which left the top 10 with only a handful of names. Ties go to
+      // whoever got there first, so the order doesn't shuffle between loads.
       const rows = await query(
-        "select name, disc, wave, kills, cls from public.scores where mode = 'normal' " +
-        'order by wave desc, kills desc limit 80'
+        'select name, disc, wave, kills, cls from (' +
+        '  select distinct on (name, coalesce(disc, \'\')) name, disc, wave, kills, cls, created_at' +
+        "  from public.scores where mode = 'normal'" +
+        "  order by name, coalesce(disc, ''), wave desc, kills desc, created_at" +
+        ') best order by wave desc, kills desc, created_at limit 80'
       );
       return res.status(200).json(rows);
     } catch (e) {

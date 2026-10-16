@@ -3,3 +3,12 @@ versions
 
 # balance tooling — dev only
 tools
+
+# not part of the game: schema, notes, and anything secret stay off the public site
+db
+docs
+neon-import.sql
+*.backup
+*.backup.gz
+.env
+.env.*

@@ -23,6 +23,8 @@ images/  (all 1920x1080 unless noted)
   kryptvault-boss-1920x1080.png          "FACE THE VAULT KEEPER", wave 50.
   kryptvault-horde-1920x1080.png         "HOW FAR CAN YOU GO?", a Warrior in a huge horde.
   kryptvault-heroes-1920x1080.png        The 5 heroes and their ascendancies.
+  kryptvault-banner-728x90.png           Web banner, the standard 728x90 "leaderboard" ad
+                                         size. 36 KB (ad networks usually allow 150 KB).
   kryptvault-link-preview-1200x630.png   The picture shown when someone shares the game's
                                          link (Discord, X, WhatsApp...). Already live on
                                          the site as og.png.

@@ -101,7 +101,7 @@ const TILE = (W, H) => `<!doctype html><html><head><meta charset="utf-8"><style>
 </script></body></html>`;
 
 const page = (W, H, B, T, body) => `<!doctype html><html><head><meta charset="utf-8"><style>${CSS(W, H, B + T)}</style></head>
-<body><canvas id="frame" width="${W}" height="${H}"></canvas><div id="stage">${body}</div><script>${FRAME(B, T)}</script></body></html>`;
+<body><canvas id="frame" width="${W}" height="${H}"></canvas><div id="stage">${body}</div>${B ? `<script>${FRAME(B, T)}</script>` : ''}</body></html>`;
 
 const vignette = (a) => `<div class="layer" style="background: radial-gradient(ellipse 75% 70% at 50% 45%, rgba(0,0,0,0) 55%, rgba(8,4,18,${a}) 100%);"></div>`;
 
@@ -214,7 +214,18 @@ const IMAGES = [
     <div class="abs" style="left:0; right:0; bottom:120px; text-align:center;">${logo(120)}</div>
     <div class="abs t sh" style="left:0; right:0; bottom:52px; text-align:center; font-size:34px;">EVERY POWER HAS A PRICE</div>` },
 
-  // 10. itch page background: Vault bricks that tile seamlessly
+  // 10. 728x90 web banner (the standard "leaderboard" ad): logo, the horde at
+  // exactly half the wide scene's size (2px per game pixel), and a play button
+  { name: 'banner-728x90', W: 728, H: 90, B: 0, T: 0, body: `
+    <div class="scene" style="background-image:url(${img('scene-keyart-wide.png')}); background-size:960px 540px; background-position:${-15 * 2}px ${-70 * 2}px;"></div>
+    <div class="layer" style="background: linear-gradient(90deg, rgba(8,4,16,0.94) 0, rgba(8,4,16,0.86) 46%, rgba(8,4,16,0.15) 58%, rgba(8,4,16,0.15) 70%, rgba(8,4,16,0.9) 80%, rgba(8,4,16,0.96) 100%);"></div>
+    <div class="layer" style="box-shadow: inset 0 0 0 1px #000, inset 0 0 0 3px #c9a227, inset 0 0 0 4px #000;"></div>
+    <div class="abs" style="left:16px; top:17px;">${logo(32)}</div>
+    <div class="abs t sh" style="left:18px; top:61px; font-size:8px; color:#e8d9a8;">EVERY POWER HAS A PRICE</div>
+    <div class="abs t" style="right:16px; top:15px; font-size:16px; color:#fff; background:#c0141c; border:3px solid #FFD700; outline:2px solid #000; box-shadow:4px 4px 0 #000; padding:9px 12px 7px; text-shadow:2px 2px 0 #000;">PLAY FREE</div>
+    <div class="abs t sh gold" style="right:14px; top:66px; font-size:8px;">ODDSLICE.ITCH.IO</div>` },
+
+  // 11. itch page background: Vault bricks that tile seamlessly
   { name: 'itch-background-tile-256', W: 256, H: 256, tile: true },
 ];
 

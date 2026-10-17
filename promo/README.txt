@@ -8,6 +8,14 @@ video/
                                     an endgame horde, then "PLAY KRYPTVAULT NOW,
                                     UPDATE 1.2.1 LIVE!"
 
+tiktok/  (vertical 1080x1920 videos for TikTok, Reels and Shorts)
+  kryptvault-tiktok-pov.mp4         "POV: you made it to wave 46": horde, detonation,
+                                    flashback to wave 1, "HOW FAR CAN YOU GO?"
+  kryptvault-tiktok-bosses.mp4      The four bosses back to back.
+  kryptvault-tiktok-heroes.mp4      The five heroes and their abilities,
+                                    "COMMENT YOUR PICK!"
+  POSTING.txt                       Captions, hashtags and posting tips for each.
+
 images/  (all 1920x1080 unless noted)
   kryptvault-keyart-1920x1080.png        Main image: a Bombardier against a horde with the
                                          Vault Keeper above. "EVERY POWER HAS A PRICE".

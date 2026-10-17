@@ -77,7 +77,9 @@ opens.
 - `tools/promo/` rebuilds them all from the real game (needs Playwright):
   `scenes.cjs` stages and renders the game scenes, `compose.cjs` frames them
   with the logo and text, and `video.cjs` records the 30-second trailer (needs
-  ffmpeg). The usage line is at the top of each file. To update the images
+  ffmpeg), and `tiktok.cjs` the three vertical 1080x1920 videos (the world
+  drawn again on a tall canvas with a camera on the hero). The usage line is
+  at the top of each file. To update the images
   for a new version, change the text in `compose.cjs` and run it again.
 
 ## What's been built (newest first)
